@@ -1,0 +1,230 @@
+import React, { useState, useEffect } from 'react';
+import { 
+  Home, 
+  History, 
+  Search, 
+  Newspaper, 
+  User, 
+  Info, 
+  Download, 
+  Maximize2,
+  Loader2,
+  ChevronRight,
+  Menu,
+  LineChart,
+  Brain,
+  Edit2
+} from 'lucide-react';
+
+const App = () => {
+  const [activeTab, setActiveTab] = useState('Daily Digest');
+  const [overallProgress, setOverallProgress] = useState(25);
+  const [isPersonalized, setIsPersonalized] = useState(true);
+
+  // 模拟进度增长 (用于 Deep Search 页面)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setOverallProgress(prev => (prev < 100 ? prev + 1 : 25));
+    }, 2000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const navItems = [
+    { name: 'History', icon: <History size={20} /> },
+    { name: 'Home', icon: <Home size={20} /> },
+    { name: 'Deep Search', icon: <Search size={20} /> },
+    { name: 'Daily Digest', icon: <Newspaper size={20} /> },
+    { name: 'Personalized', icon: <User size={20} /> },
+    { name: 'About', icon: <Info size={20} /> },
+  ];
+
+  // --- 视图 1: Deep Search & Reports ---
+  const renderDeepSearch = () => (
+    <div className="max-w-6xl mx-auto animate-in fade-in duration-500">
+      <h1 className="text-3xl font-bold text-slate-800 mb-8 tracking-tight">Deep Search & Reports</h1>
+      <div className="flex space-x-4 mb-10">
+        <div className="flex-1 relative">
+          <input
+            type="text"
+            placeholder="Enter Query..."
+            className="w-full h-12 pl-4 pr-4 bg-white border border-slate-200 rounded-xl shadow-inner focus:outline-none focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-400 transition-all text-slate-600"
+          />
+        </div>
+        <button className="px-8 h-12 bg-gradient-to-r from-cyan-400 to-blue-400 text-white font-bold rounded-xl shadow-lg shadow-cyan-200 hover:shadow-cyan-300 transform active:scale-95 transition-all">
+          SEARCH
+        </button>
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* 进度卡片 */}
+        <div className="bg-white border border-cyan-100 rounded-3xl p-8 shadow-xl shadow-cyan-50/50 flex flex-col">
+          <h2 className="text-xs font-bold text-slate-400 tracking-widest uppercase mb-6">Report Generation In Progress...</h2>
+          <div className="relative mb-10">
+            <div className="flex justify-between items-end mb-2">
+              <div className="h-6 w-48 bg-slate-100 rounded-full overflow-hidden">
+                <div className="h-full bg-gradient-to-r from-cyan-300 to-blue-400 transition-all duration-500" style={{ width: `${overallProgress}%` }}></div>
+              </div>
+              <span className="text-2xl font-bold text-slate-700">{overallProgress}%</span>
+            </div>
+          </div>
+          <div className="space-y-6 relative">
+            <div className="absolute left-[9px] top-3 bottom-3 w-[2px] bg-slate-100"></div>
+            <div className="relative pl-8">
+              <div className="absolute left-0 top-2 w-[20px] h-[20px] rounded-full bg-white border-2 border-cyan-400 flex items-center justify-center z-10">
+                <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></div>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-sm font-semibold text-slate-600 mb-2">HOST: Outlining (50%)</span>
+                <div className="h-2 w-48 bg-slate-100 rounded-full overflow-hidden">
+                  <div className="h-full w-1/2 bg-gradient-to-r from-cyan-300 to-blue-400"></div>
+                </div>
+              </div>
+            </div>
+            <div className="relative pl-8">
+              <div className="absolute left-[-4px] top-2 w-[10px] h-[10px] rounded-full bg-slate-200 z-10"></div>
+              <div className="flex flex-col">
+                <span className="text-sm font-semibold text-slate-500 mb-2">AGENT 1: Initial Draft (75%)</span>
+                <div className="h-2 w-48 bg-slate-100 rounded-full overflow-hidden">
+                  <div className="h-full w-3/4 bg-gradient-to-r from-cyan-300 to-blue-400"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        {/* 预览卡片 */}
+        <div className="bg-white border border-slate-100 rounded-3xl p-8 shadow-xl shadow-slate-100 flex flex-col">
+          <h3 className="text-xl font-bold text-slate-800 mb-4">Report: AI in Healthcare - Ethics</h3>
+          <div className="flex-1 text-slate-600 space-y-4 text-sm leading-relaxed overflow-y-auto pr-2 custom-scrollbar">
+            <p>The integration of AI in healthcare presents to ensurement presents and ethical auttoex and contribution to assume using vaw ousting healthcare activities...</p>
+          </div>
+          <div className="mt-8 flex space-x-4">
+            <button className="flex-1 h-12 border border-cyan-100 bg-cyan-50/50 text-cyan-600 font-bold rounded-xl hover:bg-cyan-100 transition-colors flex items-center justify-center space-x-2"><Maximize2 size={18} /><span>Expand</span></button>
+            <button className="flex-[1.5] h-12 bg-gradient-to-r from-cyan-400 to-blue-400 text-white font-bold rounded-xl shadow-lg shadow-cyan-200 hover:shadow-cyan-300 transform active:scale-95 transition-all flex items-center justify-center space-x-2"><Download size={18} /><span>Download</span></button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  // --- 视图 2: Daily Digest ---
+  const renderDailyDigest = () => (
+    <div className="max-w-6xl mx-auto animate-in slide-in-from-bottom-4 duration-500">
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold text-slate-800 tracking-tight">Daily Digest</h1>
+        <p className="text-slate-400 font-medium mt-1">FEB 1, 2026</p>
+      </div>
+
+      {/* 筛选和开关栏 */}
+      <div className="flex flex-col md:flex-row md:items-center space-y-4 md:space-y-0 md:space-x-4 mb-10">
+        <div className="flex-1 bg-white/50 backdrop-blur-sm border border-cyan-100/50 rounded-2xl p-2 flex items-center space-x-2 shadow-sm">
+          <span className="px-4 py-2 text-slate-600 font-semibold text-sm">Keywords</span>
+          <div className="flex items-center space-x-2 overflow-x-auto no-scrollbar">
+            {['AI Trends', 'Climate Tech'].map(tag => (
+              <span key={tag} className="px-4 py-1.5 bg-cyan-100/40 text-cyan-700 rounded-full text-sm font-medium whitespace-nowrap border border-cyan-200/50">
+                {tag}
+              </span>
+            ))}
+          </div>
+          <div className="flex-1"></div>
+          <button className="px-6 py-2 bg-cyan-50 text-cyan-600 font-bold rounded-xl border border-cyan-100 hover:bg-cyan-100 transition-all text-sm">
+            Edit
+          </button>
+        </div>
+
+        <div className="bg-white border border-slate-100 rounded-2xl p-2 px-6 flex items-center space-x-4 shadow-sm">
+          <span className="text-slate-500 font-semibold text-sm whitespace-nowrap">Personalized News...</span>
+          <button 
+            onClick={() => setIsPersonalized(!isPersonalized)}
+            className={`relative w-14 h-7 rounded-full transition-all duration-300 ${isPersonalized ? 'bg-cyan-400' : 'bg-slate-200'}`}
+          >
+            <div className={`absolute top-1 left-1 bg-white w-5 h-5 rounded-full transition-transform duration-300 flex items-center justify-center ${isPersonalized ? 'translate-x-7' : 'translate-x-0 shadow-sm'}`}>
+              {isPersonalized && <div className="text-[10px] font-bold text-cyan-500">ON</div>}
+              {!isPersonalized && <div className="text-[10px] font-bold text-slate-400">OFF</div>}
+            </div>
+          </button>
+        </div>
+      </div>
+
+      {/* 新闻网格 */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {[
+          { title: "AI Market Trends: Robotics & Ethics", icon: <LineChart className="text-cyan-500" size={18} />, desc: "AI Market trends: Robotics & Ethics presents & ethual auuttoex and contribution to assume the vaw ousting aubotics, leetincs and comereueherative campatetic rohir to conererative vion scrennatio, and more ..." },
+          { title: "Neuroscience Breakthroughs in epical an...", icon: <Brain className="text-cyan-500" size={18} />, desc: "Neuroscience breakthroughs in nsonhargeed process and aultures to arcsumate thost with cheorusturies mustales and and grating actions of mentoral hentorailians solutions, concotienioations and conseting on inmnuste ..." },
+          { title: "Market Trends: Robotics & Tech", icon: <LineChart className="text-cyan-500" size={18} />, desc: "AI Market trends: Robotics & Ethics in iniants a ssoemor's climates in avoutoex and optimtal by vncines; nateral secinities, and ousting camtone patonoic lanorative sehadors, shinas tslic climate Tech al corenes. ..." },
+          { title: "Neuroscience Breakthroughs, in hemb-ar...", icon: <Brain className="text-cyan-500" size={18} />, desc: "Neuroscience breakthroughs ahr healthcare presents auuttoex, and contribution to accumg untntto nonsturmental rhealthcare activities and nonomorocherative solutions, an more, vecinding a bigpi hart of cromeinention ..." }
+        ].map((card, i) => (
+          <div key={i} className="bg-white border border-cyan-50/50 rounded-3xl p-6 shadow-xl shadow-cyan-100/20 flex flex-col hover:shadow-cyan-200/40 transition-shadow group">
+            <div className="flex items-center space-x-3 mb-4">
+              <div className="p-2 bg-cyan-50 rounded-lg group-hover:scale-110 transition-transform">{card.icon}</div>
+              <h3 className="font-bold text-slate-800 text-lg leading-tight">{card.title}</h3>
+            </div>
+            <p className="text-slate-500 text-sm leading-relaxed mb-6 flex-1 line-clamp-4">
+              {card.desc}
+            </p>
+            <div className="flex items-center justify-between">
+              <div className="p-2 bg-cyan-50/50 rounded-lg">
+                {card.icon}
+              </div>
+              <button className="px-6 py-2.5 bg-gradient-to-r from-cyan-400 to-blue-400 text-white font-bold rounded-xl shadow-md shadow-cyan-200 hover:shadow-cyan-300 transform active:scale-95 transition-all text-sm">
+                Learn more
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="flex h-screen bg-[#f8fafc] text-slate-800 font-sans">
+      {/* 左侧导航栏 */}
+      <aside className="w-64 bg-white border-r border-slate-100 flex flex-col py-8 shadow-sm">
+        <div className="px-6 mb-10 flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-400 to-blue-500 flex items-center justify-center text-white font-bold italic">D</div>
+            <span className="text-xl font-bold tracking-tight text-slate-800">Daily<span className="text-cyan-500">AI</span></span>
+          </div>
+          <button className="text-slate-400 hover:text-slate-600"><Menu size={20} /></button>
+        </div>
+
+        <nav className="flex-1 px-3 space-y-1">
+          {navItems.map((item) => (
+            <button
+              key={item.name}
+              onClick={() => setActiveTab(item.name)}
+              className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all duration-200 group ${
+                activeTab === item.name
+                  ? 'bg-cyan-50 text-cyan-600 shadow-sm border border-cyan-100'
+                  : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'
+              }`}
+            >
+              <span className={`${activeTab === item.name ? 'text-cyan-600' : 'text-slate-400 group-hover:text-slate-600'} transition-colors`}>
+                {item.icon}
+              </span>
+              <span className="text-sm font-semibold">{item.name}</span>
+              {activeTab === item.name && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.8)]"></div>}
+            </button>
+          ))}
+        </nav>
+      </aside>
+
+      {/* 主内容区域 */}
+      <main className="flex-1 overflow-y-auto p-8 lg:p-12 relative">
+        {/* 背景装饰 */}
+        <div className="absolute top-0 right-0 w-96 h-96 bg-cyan-50/30 rounded-full blur-3xl -z-10 -translate-y-1/2 translate-x-1/2"></div>
+        
+        {activeTab === 'Deep Search' ? renderDeepSearch() : renderDailyDigest()}
+      </main>
+
+      <style dangerouslySetInnerHTML={{ __html: `
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      `}} />
+    </div>
+  );
+};
+
+export default App;

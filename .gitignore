@@ -1,0 +1,14 @@
+﻿# ForeignAgentKit gitignore
+.env
+outputs/
+logs/
+_test_outputs/
+__pycache__/
+.venv/
+*.pyc
+*.log
+# frontend
+frontend/node_modules/
+frontend/.next/
+# User personal docs
+docs/
