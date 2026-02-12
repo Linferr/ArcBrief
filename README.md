@@ -1,42 +1,43 @@
 ﻿# ArcBrief
 
-ArcBrief 是一个本地优先的情报助手，具备两条核心能力：
-- **Deep Research**（Agent + Host 研究流水线，输出报告）
-- **Daily Brief**（RSS + Tavily 采集，关键词聚类，LLM 摘要）
+ArcBrief 是一个本地优先的情报助手，包含两条主线能力：
+- `Deep Research`：Agent/Host 协作式研究，生成可预览、可下载报告
+- `Daily Brief`：RSS + Tavily 采集，聚类后生成每日简讯
 
-本 README 与 `docs/specification.md` 保持一致，作为当前版本的对外说明。
+当前实现以单机可用、流程闭环和可迭代为目标。
 
 ---
 
-## 1. 功能概览
+## 1. 当前能力
 
-### A. 每日简讯（News Feed）
-- 采集：RSS + Tavily
+### 1.1 Deep Research
+- 流程阶段：`outline -> search -> summary -> host -> reflection -> final`
+- 前端显示 Pipeline 进度、事件日志、报告预览
+- 报告会持久化到 SQLite（`research_runs`），服务重启后历史仍可查
+- 历史支持查看全文与下载
+
+### 1.2 Daily Brief
+- 数据来源：RSS 优先 + Tavily 补充
 - 聚类：关键词匹配（Phase 1）
-- 摘要：LLM 优先，缺省时用正文片段兜底
-- 输出内容包含：
-  - 标题 + 日期
-  - 摘要
-  - 重点标题列表
-  - 来源统计
-
-### B. 深度研究（Deep Research）
-- 用户输入问题
-- Agent 流水线阶段：
-  `outline → search → summary → host → reflection → final`
-- 前端展示进度 + 报告预览
-- 历史记录可查看
+- 摘要：LLM 优先，失败时使用规则兜底
+- 支持全主题一键 `Refresh & Generate`
+- 支持 `All Topics` 聚合视图（每个 topic 展示最新一份简讯）
+- 支持按 topic 查看 `Recent Briefs` 历史并切换当日卡片
+- 简讯卡片内直接展示 `Sources` 与关键词摘要
+- 简讯与研究报告均支持 `Export PDF`
+- 采集返回细粒度统计：`collected` / `saved` / `duplicates` / `failed_topics`
+- 默认仅展示最近 48 小时内容（可配置）
+- 内置质量闸门：过滤首页 URL、浅路径、短标题、短正文
+- 内置低信息清洗：过滤 HN 类 `Article URL / Comments / Points` 噪声字段
 
 ---
 
-## 2. 技术栈（暂定）
+## 2. 技术栈
 
-- 后端：FastAPI 单体
+- 后端：FastAPI（单体）
 - 数据库：SQLite（起步）
 - 定时任务：APScheduler
-- 采集：RSS (feedparser) + Tavily
-- 聚类：关键词匹配（Phase 1）
-- 摘要：LLM 可选，缺省时兜底
+- 采集：feedparser（RSS）+ Tavily
 - 前端：Next.js
 - 部署：本地优先
 
@@ -44,15 +45,14 @@ ArcBrief 是一个本地优先的情报助手，具备两条核心能力：
 
 ## 3. 项目结构
 
-```
+```text
 ArcBrief/
-├─ foreign_query_agent/      # Query Agent 核心
-├─ backend/                  # FastAPI + SQLite + Scheduler
+├─ backend/                  # FastAPI API、SQLite、Scheduler
+├─ foreign_query_agent/      # Research Agent 核心
 ├─ frontend/                 # Next.js 前端
-├─ scripts/                  # 快速启动 / 主题管理
-├─ logs/                     # 研究日志
-├─ outputs/                  # 报告输出
-├─ app.py                    # Streamlit 最小调试 UI
+├─ scripts/                  # 辅助脚本
+├─ outputs/                  # 研究报告输出
+├─ logs/                     # 运行日志
 ├─ discord_bot.py            # Discord Bot（可选）
 ├─ requirements.txt
 └─ .env
@@ -60,106 +60,162 @@ ArcBrief/
 
 ---
 
-## 4. 快速启动
+## 4. 快速启动（本地测试）
 
-### 4.1 安装后端依赖
+### 第 1 步：安装依赖
 
-```
-cd d:\桌面\Agent\ArcBrief
+```bash
+# 后端
 pip install -r requirements.txt
+
+# 前端
+cd frontend 
+npm install 
 ```
 
-### 4.2 配置环境变量
+### 第 2 步：配置 .env
 
-在项目根目录创建 `.env`：
+项目根目录已有 `.env`，也可参考 `.env.example`，只需确认以下三项有值：
 
-```
+```env
+# LLM（必填，OpenAI 兼容接口）
 FQ_LLM_API_KEY=your_key
 FQ_LLM_BASE_URL=your_base_url
 FQ_LLM_MODEL=your_model
+
+# 搜索（必填，用于采集和研究）
 TAVILY_API_KEY=your_tavily_key
-ARCBRIEF_DB_PATH=arcbrief.db
+ARCBRIEF_ENABLE_TAVILY=1
 ```
 
-可选（Discord）：
-```
-DISCORD_TOKEN=your_discord_bot_token
-ARCBRIEF_API_BASE=http://localhost:8000/api
+可选（推荐在非本机环境配置）：
+```env
+ARCBRIEF_API_KEY=replace-with-your-key
+ALLOWED_ORIGINS=http://localhost:3000
+ARCBRIEF_NEWS_MAX_AGE_HOURS=48
+ARCBRIEF_ALLOW_UNDATED=1
+ARCBRIEF_RSS_REQUIRE_PUBLISHED=1
+ARCBRIEF_RSS_ONLY=0
+ARCBRIEF_MIN_RSS_ITEMS_BEFORE_TAVILY=12
+ARCBRIEF_MIN_TITLE_LEN=12
+ARCBRIEF_MIN_CONTENT_LEN=40
+ARCBRIEF_MIN_URL_PATH_DEPTH=1
+# 前端开发者面板（默认关闭，避免普通用户看到运行诊断）
+NEXT_PUBLIC_SHOW_DEV_PANELS=0
+# Brief 关键词矩阵与论文限流（默认开启）
+ARCBRIEF_ENABLE_KEYWORD_MATRIX=1
+ARCBRIEF_KEYWORD_MIN_SCORE=1
+ARCBRIEF_ARXIV_MIN_SCORE=2
+ARCBRIEF_ARXIV_MAX_ITEMS=3
 ```
 
-### 4.3 启动后端
+> 鉴权、数据库、CORS 均有本地默认值，无需额外配置即可启动。
+> 前端也无需创建 `.env.local`，默认连 `localhost:8000` 且使用本地开发密钥。
 
-```
+### 第 3 步：启动
+
+打开两个终端：
+
+```bash
+# 终端 1 — 后端
 uvicorn backend.main:app --reload --port 8000
+
+# 终端 2 — 前端
+cd frontend && npm run dev
 ```
 
-### 4.4 启动前端
+打开浏览器访问 **http://localhost:3000**
 
-```
-cd frontend
-npm install
-npm run dev
+---
+
+## 5. API 鉴权说明
+
+- 所有 `/api/*` 请求都需要请求头：`X-API-Key`
+- Key 来自后端环境变量 `ARCBRIEF_API_KEY`
+- 前端通过 `NEXT_PUBLIC_ARCBRIEF_API_KEY` 自动附加请求头
+- 未携带或不匹配会返回 `401 Unauthorized`
+> 若 `ARCBRIEF_API_KEY` 为空或仍是占位值（如 `replace-with-your-key`），后端会自动使用本地默认值 `arcbrief-local-dev-key`，方便本机测试。
+> 本机访问（`127.0.0.1`/`::1`）默认跳过鉴权，避免本地联调频繁 401。
+
+--- 
+
+## 5.1 RSS-Only 调试模式
+
+如需验证“只用 RSS 是否能收到消息”，可在后端启动前设置：
+
+```env
+ARCBRIEF_RSS_ONLY=1
 ```
 
-前端 API 地址（可选）：
-```
-NEXT_PUBLIC_API_BASE=http://localhost:8000/api
+这会关闭 Tavily 补充，仅使用 RSS 采集链路。
+
+如需临时完全禁用 Tavily（例如 API 配额不足），可设置：
+
+```env
+ARCBRIEF_ENABLE_TAVILY=0
 ```
 
 ---
 
-## 5. 核心 API
+## 6. 关键接口（当前）
 
-研究：
+Research：
 - `POST /api/run`
 - `GET /api/status/{run_id}`
 - `GET /api/history`
+- `GET /api/report/{run_id}`
+- `GET /api/report/{run_id}/download`
 
-简讯：
+Brief：
+- `GET /api/topics`
+- `POST /api/topics`
+- `PUT /api/topics/{topic_id}`
+- `DELETE /api/topics/{topic_id}`
+- `POST /api/topics/{topic_id}/collect`
 - `POST /api/topics/collect_all`
+- `POST /api/topics/{topic_id}/brief`
 - `POST /api/topics/brief_all`
 - `GET /api/briefs/{topic_id}/latest`
+- `GET /api/briefs/{topic_id}/history?limit=14`
+- `GET /api/briefs/recent?limit=200`
+- `GET /api/briefs/{brief_id}/feedback`
+- `POST /api/briefs/{brief_id}/feedback?rating=1|-1`
+- `GET /api/briefs/{brief_id}/export/pdf`
 - `GET /api/topics/{topic_id}/articles?hours=72&sort=time`
 
 ---
 
-## 6. 默认主题
+## 7. 默认主题
 
-后端启动时自动注入 3 个默认主题：
+首次启动且数据库为空时，自动注入 3 个主题：
 - Global Trending
 - Macro and Metals
 - AI Daily
 
-可在前端 Settings 页面修改。
+可在前端 `Settings` 中增删改。
 
 ---
 
-## 7. 当前状态（对照需求）
+## 8. 已实现与待实现
 
 已实现：
-- Agent + Host 研究流程
-- Daily Brief 流程（Phase 1）
-- 关键词聚类 + 摘要
-- 默认主题
-- 前端 Research / News / Settings
+- API Key 基础鉴权
+- Research 报告持久化与历史查询
+- 简讯采集与生成（Phase 1）
+- 全主题批量采集/生成
+- 超时提示、空状态引导、报告下载
+- 老文章定时清理（默认 30 天）
 
-未实现：
-- RSS 稳定性监控
-- Phase 2 LLM 归类
-- 向量化 / pgvector
-- Discord Bot 部署
+待实现：
+- 更完整的认证/授权模型（多用户）
+- Prompt Injection 防护与限流
+- Phase 2：LLM 归类与质量反馈回路
+- Discord Bot 正式部署与运维
 
 ---
 
-## 8. 相关文档
+## 9. 文档入口
 
-- 需求文档：`docs/specification.md`
-- 进度日志：`docs/Progress/progress.md`
+- 需求基线：`docs/specification.md`
 - 任务清单：`docs/tasks.md`
-
----
-
-## 9. 备注
-
-- Phase 1 以“可跑 + 可解释”为目标
-- Phase 2 以“摘要质量 + 自动分类”为优化目标
+- 进度记录：`docs/progress.md`

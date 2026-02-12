@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ArcBrief - Intelligence Desk</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入核心字体：Merriweather (衬线/内容), Inter (无衬线/UI), JetBrains Mono (代码/数据) -->
+    <link href="https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@0,300;0,400;0,700;0,900;1,300&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+    
+    <script>
+        tailwind.config = {
+            darkMode: 'class', // 手动控制深色模式
+            theme: {
+                extend: {
+                    colors: {
+                        // 暖色系 (Paper Mode)
+                        paper: {
+                            bg: '#FBF8F1',      // 主背景
+                            sidebar: '#F4EFE6', // 侧边栏
+                            card: '#FFFFFF',    // 强调区域（如纸张）
+                            border: '#E6E0D0',  // 柔和边框
+                            text: '#2D2D2D',    // 主文字（炭黑）
+                            muted: '#78716C',   // 辅助文字
+                            accent: '#3F3F46',  // 强调色
+                            highlight: '#D1FAE5', // 荧光绿背景
+                            highlightText: '#065F46' // 荧光绿文字
+                        },
+                        // 冷色系 (Cool Mode)
+                        cool: {
+                            bg: '#FFFFFF',
+                            sidebar: '#F9FAFB',
+                            border: '#E5E7EB',
+                            text: '#111827',
+                            muted: '#6B7280',
+                            accent: '#000000',
+                            highlight: '#F3F4F6',
+                            highlightText: '#1F2937'
+                        }
+                    },
+                    fontFamily: {
+                        serif: ['Merriweather', 'serif'],
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* 核心样式变量定义 */
+        :root {
+            --bg-main: #FBF8F1;
+            --bg-sidebar: #F4EFE6;
+            --bg-element: #EBE5D9; /* 输入框等背景 */
+            --border-color: #E6E0D0;
+            --text-primary: #2D2D2D;
+            --text-secondary: #57534E;
+            --text-tertiary: #A8A29E;
+            --accent-color: #000000;
+            --highlight-bg: #D1FAE5;
+            --highlight-text: #064E3B;
+            --font-body: 'Merriweather', serif; 
+            --font-ui: 'Inter', sans-serif;
+            --toggle-bg: #D6D3C9;
+            --toggle-active: #2D2D2D;
+        }
+
+        /* 冷色模式覆盖 */
+        [data-theme="cool"] {
+            --bg-main: #FFFFFF;
+            --bg-sidebar: #F9FAFB;
+            --bg-element: #F3F4F6;
+            --border-color: #E5E7EB;
+            --text-primary: #111827;
+            --text-secondary: #4B5563;
+            --text-tertiary: #9CA3AF;
+            --accent-color: #111827;
+            --highlight-bg: #E5E7EB;
+            --highlight-text: #111827;
+            --font-body: 'Inter', sans-serif; /* 冷色模式下切回无衬线体，更符合SaaS直觉，或者保留serif看个人喜好 */
+            --toggle-bg: #E5E7EB;
+            --toggle-active: #111827;
+        }
+
+        body {
+            background-color: var(--bg-main);
+            color: var(--text-primary);
+            font-family: var(--font-body);
+            transition: all 0.3s ease;
+        }
+
+        /* UI组件字体强制使用无衬线，保证清晰度 */
+        .ui-font { font-family: var(--font-ui); }
+        .mono-font { font-family: 'JetBrains Mono', monospace; }
+
+        .sidebar {
+            background-color: var(--bg-sidebar);
+            border-right: 1px solid var(--border-color);
+        }
+
+        /* 模拟荧光笔划重点 */
+        .highlight-mark {
+            background-color: var(--highlight-bg);
+            color: var(--highlight-text);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            font-family: var(--font-ui);
+            vertical-align: middle;
+            font-weight: 500;
+        }
+
+        /* 隐藏滚动条但保留功能 */
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        /* 自定义输入框聚焦效果 */
+        .custom-input:focus {
+            outline: none;
+            box-shadow: 0 1px 0 0 var(--text-primary);
+        }
+
+        /* 模拟纸张阴影 */
+        .paper-shadow {
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+        }
+        
+        /* 选中态 */
+        .nav-active {
+            background-color: rgba(0,0,0,0.05);
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+
+        /* 自定义 Toggle Switch */
+        .toggle-checkbox:checked {
+            right: 0;
+            border-color: var(--toggle-active);
+        }
+        .toggle-checkbox:checked + .toggle-label {
+            background-color: var(--toggle-active);
+        }
+        .toggle-checkbox:checked + .toggle-label:before {
+            transform: translateX(100%);
+        }
+        .toggle-label {
+            width: 36px;
+            height: 20px;
+            position: relative;
+            display: inline-block;
+            background-color: var(--toggle-bg);
+            border-radius: 9999px;
+            transition: all 0.3s;
+            cursor: pointer;
+        }
+        .toggle-label:before {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background-color: white;
+            transition: all 0.3s;
+        }
+    </style>
+</head>
+<body class="h-screen flex overflow-hidden">
+
+    <!-- 左侧导航 (Sidebar) -->
+    <aside class="sidebar w-64 flex-shrink-0 flex flex-col pt-8 pb-6 ui-font transition-colors duration-300">
+        <div class="px-6 mb-8">
+            <h1 class="text-xl font-bold tracking-tight flex items-center gap-2">
+                <span class="w-2 h-6 bg-[var(--text-primary)] block"></span>
+                ArcBrief
+            </h1>
+            <p class="text-xs text-[var(--text-tertiary)] mt-1 tracking-wider uppercase pl-4">Intelligence Desk</p>
+        </div>
+
+        <nav class="flex-1 px-4 space-y-1">
+            <button onclick="switchModule('brief')" id="nav-brief" class="nav-item w-full text-left px-3 py-2.5 rounded-md text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-element)] transition-all flex items-center group">
+                <span class="w-5 text-center mr-3 opacity-60">📰</span>
+                Daily Brief
+            </button>
+            <button onclick="switchModule('research')" id="nav-research" class="nav-item w-full text-left px-3 py-2.5 rounded-md text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-element)] transition-all flex items-center group">
+                <span class="w-5 text-center mr-3 opacity-60">🔍</span>
+                Deep Research
+            </button>
+            <button onclick="switchModule('settings')" id="nav-settings" class="nav-item w-full text-left px-3 py-2.5 rounded-md text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-element)] transition-all flex items-center group">
+                <span class="w-5 text-center mr-3 opacity-60">⚙️</span>
+                Settings
+            </button>
+
+            <div class="pt-4 mt-4 border-t border-[var(--border-color)]">
+                <div class="px-3 text-xs font-medium text-[var(--text-tertiary)] uppercase mb-2">Library</div>
+                <button class="w-full text-left px-3 py-2 rounded-md text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-element)] transition-all flex items-center">
+                    <span class="w-5 text-center mr-3 opacity-60">📂</span>
+                    Archives
+                </button>
+            </div>
+        </nav>
+
+        <div class="px-6 ui-font">
+            <button class="flex items-center space-x-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
+                <div class="w-2 h-2 rounded-full bg-green-500"></div>
+                <span>System Operational</span>
+            </button>
+        </div>
+    </aside>
+
+    <!-- 主内容区 -->
+    <main class="flex-1 overflow-hidden relative flex flex-col">
+        
+        <!-- 顶部通栏 (Header) -->
+        <header class="h-16 flex items-center justify-between px-8 md:px-12 border-b border-[var(--border-color)] bg-[var(--bg-main)]/80 backdrop-blur-sm z-10 transition-colors duration-300">
+            <div class="ui-font text-sm text-[var(--text-tertiary)] flex items-center">
+                <span>Workspace</span>
+                <span class="mx-2">/</span>
+                <span id="header-breadcrumb" class="text-[var(--text-primary)] font-medium">Deep Research</span>
+            </div>
+            <div class="flex items-center space-x-4 ui-font">
+                <span class="text-xs text-[var(--text-tertiary)] border border-[var(--border-color)] px-2 py-1 rounded">v2.4.0</span>
+                <div class="w-8 h-8 rounded-full bg-[var(--bg-element)] flex items-center justify-center text-xs font-bold border border-[var(--border-color)]">OP</div>
+            </div>
+        </header>
+
+        <!-- 内容容器 -->
+        <div class="flex-1 overflow-y-auto overflow-x-hidden p-8 md:p-12 scroll-smooth" id="content-container">
+            
+            <!-- MODULE A: NEWS FEED (简讯) -->
+            <div id="module-brief" class="hidden max-w-5xl mx-auto">
+                <div class="mb-10">
+                    <h2 class="text-3xl font-serif font-bold mb-2 text-[var(--text-primary)]">Daily Briefing</h2>
+                    <p class="text-[var(--text-secondary)] ui-font">Wednesday, Feb 11, 2026</p>
+                </div>
+
+                <!-- Topic Chips (Paper Style) -->
+                <div class="flex flex-wrap items-center gap-3 mb-10 ui-font">
+                    <button class="px-4 py-1.5 rounded-full border border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-main)] text-sm font-medium shadow-sm transition-transform active:scale-95">All Topics</button>
+                    <button class="px-4 py-1.5 rounded-full border border-[var(--border-color)] text-[var(--text-secondary)] text-sm font-medium hover:border-[var(--text-secondary)] bg-transparent transition-colors">AI Policy</button>
+                    <button class="px-4 py-1.5 rounded-full border border-[var(--border-color)] text-[var(--text-secondary)] text-sm font-medium hover:border-[var(--text-secondary)] bg-transparent transition-colors">Semiconductors</button>
+                    <button class="px-4 py-1.5 rounded-full border border-[var(--border-color)] text-[var(--text-secondary)] text-sm font-medium hover:border-[var(--text-secondary)] bg-transparent transition-colors">Crypto Markets</button>
+                    
+                    <div class="flex-1"></div>
+                    <button class="text-xs flex items-center space-x-1 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                        <span>Refresh Brief</span>
+                    </button>
+                </div>
+
+                <!-- Feed Content Layout: Newspaper Columns -->
+                <div class="grid grid-cols-1 lg:grid-cols-12 gap-10">
+                    
+                    <!-- 主栏：简讯卡片 (占用8列) -->
+                    <div class="lg:col-span-8 space-y-12">
+                        <!-- Card 1 -->
+                        <article class="group relative">
+                            <div class="absolute -left-6 top-1 w-1 h-full border-l-2 border-[var(--border-color)] group-hover:border-[var(--text-primary)] transition-colors hidden md:block"></div>
+                            
+                            <div class="flex justify-between items-start mb-3 ui-font">
+                                <span class="text-xs font-bold tracking-wide uppercase text-[var(--text-tertiary)]">AI Policy • EU Region</span>
+                                <div class="flex items-center space-x-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button class="text-[var(--text-tertiary)] hover:text-green-600 transition-colors"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5"></path></svg></button>
+                                    <button class="text-[var(--text-tertiary)] hover:text-red-600 transition-colors"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14H5.236a2 2 0 01-1.789-2.894l3.5-7A2 2 0 018.736 3h4.018a2 2 0 01.485.06l3.76.94m-7 10v5a2 2 0 002 2h.095c.5 0 .905-.405.905-.905 0-.714.211-1.412.608-2.006L17 13V4m-7 10h2"></path></svg></button>
+                                </div>
+                            </div>
+
+                            <h3 class="text-2xl font-serif font-bold leading-tight mb-4 text-[var(--text-primary)]">
+                                EU AI Act enters final implementation phase with new compliance tiers for Generative Models
+                            </h3>
+                            
+                            <p class="text-lg text-[var(--text-secondary)] leading-relaxed mb-6 font-serif">
+                                The European Commission has officially released the technical standards for "High-Impact General Purpose AI Models." Key changes include a mandatory transparency registry and stricter copyright compliance checks before model training.
+                            </p>
+
+                            <div class="bg-[var(--bg-sidebar)] p-4 rounded-sm border border-[var(--border-color)] mb-4">
+                                <h4 class="ui-font text-xs font-bold uppercase text-[var(--text-secondary)] mb-2">Key Takeaways</h4>
+                                <ul class="space-y-2 ui-font text-sm text-[var(--text-secondary)]">
+                                    <li class="flex items-start"><span class="mr-2 text-[var(--text-tertiary)]">•</span> Compliance deadline set for August 2026.</li>
+                                    <li class="flex items-start"><span class="mr-2 text-[var(--text-tertiary)]">•</span> Fines up to 7% of global turnover for non-compliance.</li>
+                                </ul>
+                            </div>
+
+                            <div class="flex items-center space-x-4 ui-font text-xs text-[var(--text-tertiary)]">
+                                <span class="flex items-center"><svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20"><path d="M10 12a2 2 0 100-4 2 2 0 000 4z"/><path fill-rule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clip-rule="evenodd"/></svg> TechCrunch</span>
+                                <span>•</span>
+                                <span>2 hours ago</span>
+                            </div>
+                        </article>
+                    </div>
+
+                    <!-- 侧栏：Source & History (占用4列) -->
+                    <div class="lg:col-span-4 pl-0 lg:pl-8 border-l border-[var(--border-color)]">
+                        <div class="sticky top-0">
+                            <h4 class="ui-font text-xs font-bold uppercase text-[var(--text-tertiary)] mb-6">Recent Sources (48h)</h4>
+                            <ul class="space-y-4">
+                                <li class="group cursor-pointer">
+                                    <div class="text-sm font-medium text-[var(--text-primary)] group-hover:underline ui-font">The Verge</div>
+                                    <div class="text-xs text-[var(--text-secondary)] mt-0.5 font-serif truncate">OpenAI releases new safety guidelines...</div>
+                                    <div class="text-[10px] text-[var(--text-tertiary)] mt-1 ui-font">14:20 PM • Source Reliability: High</div>
+                                </li>
+                                <li class="group cursor-pointer">
+                                    <div class="text-sm font-medium text-[var(--text-primary)] group-hover:underline ui-font">Reuters</div>
+                                    <div class="text-xs text-[var(--text-secondary)] mt-0.5 font-serif truncate">Nvidia stock surges after earnings...</div>
+                                    <div class="text-[10px] text-[var(--text-tertiary)] mt-1 ui-font">11:05 AM • Source Reliability: High</div>
+                                </li>
+                            </ul>
+                            <button class="mt-8 w-full py-2 border border-[var(--border-color)] rounded text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-element)] transition-colors ui-font">
+                                View Source Registry
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MODULE B: DEEP RESEARCH (深度搜索) -->
+            <div id="module-research" class="max-w-4xl mx-auto block">
+                <!-- Input Section -->
+                <div class="mb-12">
+                    <label class="block text-2xl font-serif font-bold text-[var(--text-primary)] mb-4">Research Run</label>
+                    <p class="text-[var(--text-secondary)] mb-6 ui-font">Ask a question. The agent will search, reflect, and draft a report.</p>
+                    <div class="relative group">
+                        <input type="text" 
+                               class="custom-input w-full bg-transparent text-xl font-serif py-4 border-b-2 border-[var(--border-color)] placeholder-[var(--text-tertiary)] transition-colors text-[var(--text-primary)]" 
+                               placeholder="Latest AI policy shifts in the US and EU..."
+                               value="Latest AI policy shifts in the US and EU"
+                        >
+                        <button class="absolute right-0 top-4 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors ui-font text-sm font-medium bg-[var(--bg-element)] px-3 py-1 rounded">
+                            Start Research ↵
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Two Column Layout for Progress & Preview -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-12">
+                    <!-- Left: Pipeline Progress -->
+                    <div>
+                        <h4 class="ui-font text-xs font-bold uppercase text-[var(--text-tertiary)] mb-6 tracking-widest">Pipeline Progress</h4>
+                        <div class="relative pl-4 border-l border-[var(--border-color)] space-y-8">
+                            <!-- Step 1: Done -->
+                            <div class="relative">
+                                <div class="absolute -left-[21px] top-1 w-3 h-3 rounded-full bg-emerald-600 border-2 border-[var(--bg-main)]"></div>
+                                <h5 class="text-sm font-medium text-[var(--text-primary)] ui-font">Query Decomposition</h5>
+                                <div class="mt-2 text-sm text-[var(--text-secondary)] font-serif">
+                                    Identified 3 core sub-questions. <span class="highlight-mark">Completed</span>
+                                </div>
+                            </div>
+                            <!-- Step 2: Active -->
+                            <div class="relative">
+                                <div class="absolute -left-[21px] top-1 w-3 h-3 rounded-full bg-emerald-600 border-2 border-[var(--bg-main)] animate-pulse"></div>
+                                <h5 class="text-sm font-medium text-[var(--text-primary)] ui-font">Deep Web Extraction</h5>
+                                <div class="mt-2 text-sm text-[var(--text-secondary)] font-serif">
+                                    Reading <span class="italic">"EU AI Act Final Draft"</span>...
+                                    <div class="w-full bg-[var(--border-color)] h-1 mt-3 rounded-full overflow-hidden">
+                                        <div class="bg-emerald-600 h-full w-2/3 rounded-full"></div>
+                                    </div>
+                                    <div class="mt-2 flex gap-2">
+                                        <span class="highlight-mark text-[10px]">Processing Source 4/12</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- Step 3: Pending -->
+                            <div class="relative opacity-50">
+                                <div class="absolute -left-[21px] top-1 w-3 h-3 rounded-full bg-[var(--border-color)] border-2 border-[var(--bg-main)]"></div>
+                                <h5 class="text-sm font-medium text-[var(--text-primary)] ui-font">Synthesis & Reporting</h5>
+                                <div class="mt-2 text-sm text-[var(--text-secondary)] font-serif">
+                                    Waiting for extraction...
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Recent History -->
+                        <div class="mt-16 pt-8 border-t border-[var(--border-color)]">
+                            <h4 class="ui-font text-xs font-bold uppercase text-[var(--text-tertiary)] mb-4 tracking-widest">Recent Runs</h4>
+                            <ul class="space-y-3">
+                                <li class="flex items-center justify-between group cursor-pointer p-2 -mx-2 hover:bg-[var(--bg-element)] rounded transition-colors">
+                                    <div class="flex items-center">
+                                        <span class="w-2 h-2 rounded-full bg-green-500 mr-3"></span>
+                                        <span class="text-sm text-[var(--text-secondary)] ui-font group-hover:text-[var(--text-primary)]">Impact of Solid State Batteries</span>
+                                    </div>
+                                    <span class="text-xs text-[var(--text-tertiary)] ui-font">2h ago</span>
+                                </li>
+                                <li class="flex items-center justify-between group cursor-pointer p-2 -mx-2 hover:bg-[var(--bg-element)] rounded transition-colors">
+                                    <div class="flex items-center">
+                                        <span class="w-2 h-2 rounded-full bg-red-400 mr-3"></span>
+                                        <span class="text-sm text-[var(--text-secondary)] ui-font group-hover:text-[var(--text-primary)]">Quantum Computing Timeline</span>
+                                    </div>
+                                    <span class="text-xs text-[var(--text-tertiary)] ui-font">Failed • Retry</span>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <!-- Right: Report Preview (The "Paper") -->
+                    <div>
+                        <div class="flex items-center justify-between mb-6">
+                            <h4 class="ui-font text-xs font-bold uppercase text-[var(--text-tertiary)] tracking-widest">Report Preview</h4>
+                            <div class="flex space-x-2">
+                                <button class="text-xs font-medium text-[var(--text-primary)] border border-[var(--border-color)] px-3 py-1 rounded hover:bg-[var(--bg-element)] ui-font transition-colors">Full Report</button>
+                                <button class="text-xs font-medium text-[var(--text-primary)] border border-[var(--border-color)] px-3 py-1 rounded hover:bg-[var(--bg-element)] ui-font transition-colors">Export PDF</button>
+                            </div>
+                        </div>
+                        <div class="bg-[var(--bg-sidebar)] border border-[var(--border-color)] p-8 min-h-[500px] paper-shadow rounded-sm relative overflow-hidden">
+                            <!-- Header of Report -->
+                            <div class="border-b border-stone-300 pb-4 mb-6">
+                                <h2 class="font-serif text-xl font-bold text-[var(--text-primary)]">Regulatory Divergence in AI: US vs EU</h2>
+                                <div class="mt-2 text-xs text-[var(--text-secondary)] ui-font flex justify-between">
+                                    <span>Generated by ArcBrief Agent</span>
+                                    <span>Feb 11, 2026</span>
+                                </div>
+                            </div>
+                            <!-- Body of Report -->
+                            <div class="space-y-4">
+                                <p class="text-sm font-serif leading-relaxed text-[var(--text-secondary)] text-justify">
+                                    <strong class="text-[var(--text-primary)]">Executive Summary:</strong> The European Union has moved towards a comprehensive, risk-based legislative framework with the AI Act, whereas the United States maintains a more fragmented, sector-specific approach driven by Executive Orders and voluntary commitments from major tech labs.
+                                </p>
+                                <h3 class="text-base font-serif font-bold text-[var(--text-primary)] mt-6 mb-2">1. The EU AI Act Implementation</h3>
+                                <p class="text-sm font-serif leading-relaxed text-[var(--text-secondary)] text-justify">
+                                    The Act categorizes AI systems into risk tiers. <span class="bg-yellow-100 px-1 text-stone-800">Unacceptable risk</span> systems are banned outright. High-risk systems face strict conformity assessments.
+                                </p>
+                                <!-- Streaming Cursor Effect -->
+                                <p class="text-sm font-serif leading-relaxed text-[var(--text-secondary)] mt-4">
+                                    Currently analyzing the specific impact on open-source models...
+                                    <span class="inline-block w-1.5 h-4 bg-[var(--text-primary)] ml-1 animate-pulse align-middle"></span>
+                                </p>
+                            </div>
+                            <!-- Watermark/Footer -->
+                            <div class="absolute bottom-4 right-6 text-[10px] text-[var(--text-tertiary)] mono-font opacity-50">
+                                REF: ID-9928-XJ
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MODULE C: SETTINGS (配置) -->
+            <div id="module-settings" class="hidden max-w-4xl mx-auto pb-20">
+                <div class="mb-10">
+                    <h2 class="text-3xl font-serif font-bold mb-2 text-[var(--text-primary)]">Agent Protocol</h2>
+                    <p class="text-[var(--text-secondary)] ui-font">System Configuration & Directives</p>
+                </div>
+
+                <!-- Section 1: Intelligence Scope -->
+                <div class="mb-12">
+                    <h3 class="ui-font text-xs font-bold uppercase text-[var(--text-tertiary)] mb-6 tracking-widest border-b border-[var(--border-color)] pb-2">Intelligence Scope</h3>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8">
+                        <!-- Topics Configuration -->
+                        <div>
+                            <label class="block text-sm font-medium text-[var(--text-primary)] ui-font mb-3">Focus Topics</label>
+                            <div class="flex flex-wrap gap-2 mb-3">
+                                <span class="px-3 py-1 rounded bg-[var(--bg-element)] border border-[var(--border-color)] text-sm text-[var(--text-secondary)] flex items-center ui-font">
+                                    AI Policy <button class="ml-2 text-[var(--text-tertiary)] hover:text-red-500">×</button>
+                                </span>
+                                <span class="px-3 py-1 rounded bg-[var(--bg-element)] border border-[var(--border-color)] text-sm text-[var(--text-secondary)] flex items-center ui-font">
+                                    Semiconductors <button class="ml-2 text-[var(--text-tertiary)] hover:text-red-500">×</button>
+                                </span>
+                                <span class="px-3 py-1 rounded bg-[var(--bg-element)] border border-[var(--border-color)] text-sm text-[var(--text-secondary)] flex items-center ui-font">
+                                    Crypto <button class="ml-2 text-[var(--text-tertiary)] hover:text-red-500">×</button>
+                                </span>
+                            </div>
+                            <input type="text" placeholder="+ Add topic..." class="w-full bg-transparent border-b border-[var(--border-color)] py-2 text-sm ui-font focus:outline-none focus:border-[var(--text-primary)] placeholder-[var(--text-tertiary)]">
+                        </div>
+
+                        <!-- Keyword Watchlist -->
+                        <div>
+                            <label class="block text-sm font-medium text-[var(--text-primary)] ui-font mb-3">Priority Watchlist (Entities)</label>
+                            <p class="text-xs text-[var(--text-secondary)] mb-3 ui-font">Agent will prioritize retrieval of these specific entities.</p>
+                            <textarea class="w-full bg-[var(--bg-element)] border border-[var(--border-color)] rounded p-3 text-sm ui-font focus:outline-none h-24 resize-none" placeholder="e.g. Sam Altman, TSMC 3nm, GPT-5..."></textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Section 2: Agent Behavior -->
+                <div class="mb-12">
+                    <h3 class="ui-font text-xs font-bold uppercase text-[var(--text-tertiary)] mb-6 tracking-widest border-b border-[var(--border-color)] pb-2">Agent Behavior</h3>
+                    
+                    <div class="space-y-6">
+                        <!-- Source Filtering -->
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h4 class="text-base font-serif font-bold text-[var(--text-primary)]">Strict Academic Mode</h4>
+                                <p class="text-sm text-[var(--text-secondary)] ui-font mt-1">Exclude social media and forums. Only index journals, official reports, and reputable news.</p>
+                            </div>
+                            <div class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
+                                <input type="checkbox" name="toggle" id="toggle-academic" class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer border-[var(--border-color)] outline-none"/>
+                                <label for="toggle-academic" class="toggle-label block overflow-hidden h-6 rounded-full bg-[var(--bg-element)] cursor-pointer"></label>
+                            </div>
+                        </div>
+
+                        <!-- Critique Level -->
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h4 class="text-base font-serif font-bold text-[var(--text-primary)]">Critical Analysis Layer</h4>
+                                <p class="text-sm text-[var(--text-secondary)] ui-font mt-1">Force agent to identify counter-arguments and logical fallacies in retrieved data.</p>
+                            </div>
+                            <div class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
+                                <input type="checkbox" name="toggle" id="toggle-critique" checked class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer border-[var(--border-color)] outline-none"/>
+                                <label for="toggle-critique" class="toggle-label block overflow-hidden h-6 rounded-full bg-[var(--bg-element)] cursor-pointer"></label>
+                            </div>
+                        </div>
+
+                        <!-- Briefing Schedule -->
+                        <div class="grid grid-cols-2 gap-8 pt-4">
+                            <div>
+                                <label class="block text-sm font-medium text-[var(--text-primary)] ui-font mb-2">Daily Briefing Schedule (EST)</label>
+                                <select class="w-full bg-[var(--bg-element)] border border-[var(--border-color)] rounded px-3 py-2 text-sm ui-font focus:outline-none appearance-none">
+                                    <option>06:00 AM</option>
+                                    <option>07:00 AM</option>
+                                    <option selected>08:00 AM</option>
+                                    <option>09:00 AM</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-[var(--text-primary)] ui-font mb-2">Report Language</label>
+                                <select class="w-full bg-[var(--bg-element)] border border-[var(--border-color)] rounded px-3 py-2 text-sm ui-font focus:outline-none appearance-none">
+                                    <option selected>English (US)</option>
+                                    <option>Chinese (Simplified)</option>
+                                    <option>Japanese</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Section 3: API & System -->
+                <div class="mb-12">
+                    <h3 class="ui-font text-xs font-bold uppercase text-[var(--text-tertiary)] mb-6 tracking-widest border-b border-[var(--border-color)] pb-2">System Connectors</h3>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        <div>
+                            <label class="block text-sm font-medium text-[var(--text-primary)] ui-font mb-2">Primary LLM Model</label>
+                            <select class="w-full bg-[var(--bg-element)] border border-[var(--border-color)] rounded px-3 py-2 text-sm ui-font focus:outline-none appearance-none">
+                                <option selected>GPT-4o (OpenAI)</option>
+                                <option>Claude 3.5 Sonnet (Anthropic)</option>
+                                <option>Gemini 1.5 Pro (Google)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-[var(--text-primary)] ui-font mb-2">Search Provider</label>
+                            <select class="w-full bg-[var(--bg-element)] border border-[var(--border-color)] rounded px-3 py-2 text-sm ui-font focus:outline-none appearance-none">
+                                <option selected>Tavily Search API</option>
+                                <option>Serper (Google)</option>
+                                <option>Bing Search</option>
+                            </select>
+                        </div>
+                        <div class="col-span-1 md:col-span-2">
+                            <label class="block text-sm font-medium text-[var(--text-primary)] ui-font mb-2">OpenAI API Key</label>
+                            <div class="flex">
+                                <input type="password" value="sk-proj-xxxxxxxxxxxxxxxxxxxx" class="flex-1 bg-[var(--bg-element)] border border-[var(--border-color)] rounded-l px-3 py-2 text-sm mono-font focus:outline-none text-[var(--text-muted)]" disabled>
+                                <button class="px-4 py-2 bg-[var(--bg-sidebar)] border border-l-0 border-[var(--border-color)] rounded-r text-sm ui-font text-[var(--text-secondary)] hover:bg-[var(--bg-element)]">Edit</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Action Bar -->
+                <div class="flex justify-end pt-6">
+                    <button class="px-6 py-2.5 bg-[var(--text-primary)] text-[var(--bg-main)] rounded text-sm font-medium hover:opacity-90 transition-opacity shadow-lg ui-font">
+                        Save Configuration
+                    </button>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- Theme Toggle -->
+    <button onclick="toggleTheme()" class="fixed bottom-6 right-6 w-10 h-10 rounded-full bg-[var(--text-primary)] text-[var(--bg-main)] shadow-lg flex items-center justify-center hover:scale-110 transition-transform z-50">
+        <svg id="themeIcon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
+    </button>
+
+    <script>
+        // Tab Switching Logic
+        function switchModule(moduleName) {
+            // Hide all
+            document.getElementById('module-brief').classList.add('hidden');
+            document.getElementById('module-research').classList.add('hidden');
+            document.getElementById('module-settings').classList.add('hidden');
+            
+            // Remove active state from nav
+            document.getElementById('nav-brief').classList.remove('nav-active', 'bg-[rgba(0,0,0,0.05)]', 'font-semibold');
+            document.getElementById('nav-research').classList.remove('nav-active', 'bg-[rgba(0,0,0,0.05)]', 'font-semibold');
+            document.getElementById('nav-settings').classList.remove('nav-active', 'bg-[rgba(0,0,0,0.05)]', 'font-semibold');
+
+            // Show selected
+            document.getElementById(`module-${moduleName}`).classList.remove('hidden');
+            
+            // Add active state
+            const activeNav = document.getElementById(`nav-${moduleName}`);
+            activeNav.classList.add('nav-active');
+
+            // Update Breadcrumb
+            const breadcrumb = document.getElementById('header-breadcrumb');
+            if(moduleName === 'brief') breadcrumb.textContent = 'Daily Brief';
+            if(moduleName === 'research') breadcrumb.textContent = 'Deep Research';
+            if(moduleName === 'settings') breadcrumb.textContent = 'System Config';
+
+            // Reset scroll
+            document.getElementById('content-container').scrollTop = 0;
+        }
+
+        // Theme Toggle Logic
+        let isWarm = true;
+        function toggleTheme() {
+            const body = document.body;
+            const icon = document.getElementById('themeIcon');
+            
+            if (isWarm) {
+                body.setAttribute('data-theme', 'cool');
+                // Change icon to Sun
+                icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path>';
+            } else {
+                body.removeAttribute('data-theme');
+                // Change icon to Moon
+                icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path>';
+            }
+            isWarm = !isWarm;
+        }
+
+        // Init: Set default active tab
+        switchModule('research');
+    </script>
+</body>
+</html>

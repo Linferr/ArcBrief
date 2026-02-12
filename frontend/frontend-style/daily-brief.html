@@ -1,0 +1,156 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ArcBrief - Daily Brief</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@0,300;0,400;0,700;0,900;1,300&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./paper-theme.css">
+</head>
+<body class="h-screen flex overflow-hidden">
+    <aside class="sidebar w-64 flex-shrink-0 flex flex-col pt-8 pb-6 ui-font transition-colors duration-300">
+        <div class="px-6 mb-8">
+            <h1 class="text-xl font-bold tracking-tight flex items-center gap-2">
+                <span class="w-2 h-6 bg-[var(--text-primary)] block"></span>
+                ArcBrief
+            </h1>
+            <p class="text-xs text-[var(--text-tertiary)] mt-1 tracking-wider uppercase pl-4">Intelligence Desk</p>
+        </div>
+        <nav class="flex-1 px-4 space-y-1">
+            <a href="./daily-brief.html" class="nav-item w-full text-left px-3 py-2.5 rounded-md text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-element)] transition-all flex items-center group nav-active">
+                <span class="w-5 text-center mr-3 opacity-60">&#128240;</span>
+                Daily Brief
+            </a>
+            <a href="./deep-research.html" class="nav-item w-full text-left px-3 py-2.5 rounded-md text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-element)] transition-all flex items-center group ">
+                <span class="w-5 text-center mr-3 opacity-60">&#128269;</span>
+                Deep Research
+            </a>
+            <a href="./settings.html" class="nav-item w-full text-left px-3 py-2.5 rounded-md text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-element)] transition-all flex items-center group ">
+                <span class="w-5 text-center mr-3 opacity-60">&#9881;</span>
+                Settings
+            </a>
+            <div class="pt-4 mt-4 border-t border-[var(--border-color)]">
+                <div class="px-3 text-xs font-medium text-[var(--text-tertiary)] uppercase mb-2">Library</div>
+                <button class="w-full text-left px-3 py-2 rounded-md text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-element)] transition-all flex items-center">
+                    <span class="w-5 text-center mr-3 opacity-60">&#128194;</span>
+                    Archives
+                </button>
+            </div>
+        </nav>
+        <div class="px-6 ui-font">
+            <button class="flex items-center space-x-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
+                <div class="w-2 h-2 rounded-full bg-green-500"></div>
+                <span>System Operational</span>
+            </button>
+        </div>
+    </aside>
+    <main class="flex-1 overflow-hidden relative flex flex-col">
+        <header class="h-16 flex items-center justify-between px-8 md:px-12 border-b border-[var(--border-color)] bg-[var(--bg-main)]/80 backdrop-blur-sm z-10 transition-colors duration-300">
+            <div class="ui-font text-sm text-[var(--text-tertiary)] flex items-center">
+                <span>Workspace</span>
+                <span class="mx-2">/</span>
+                <span id="header-breadcrumb" class="text-[var(--text-primary)] font-medium">Daily Brief</span>
+            </div>
+            <div class="flex items-center space-x-4 ui-font">
+                <span class="text-xs text-[var(--text-tertiary)] border border-[var(--border-color)] px-2 py-1 rounded">v2.4.0</span>
+                <div class="w-8 h-8 rounded-full bg-[var(--bg-element)] flex items-center justify-center text-xs font-bold border border-[var(--border-color)]">OP</div>
+            </div>
+        </header>
+        <div class="flex-1 overflow-y-auto overflow-x-hidden p-8 md:p-12 scroll-smooth" id="content-container">
+
+<div id="module-brief" class="block max-w-5xl mx-auto">
+                <div class="mb-10">
+                    <h2 class="text-3xl font-serif font-bold mb-2 text-[var(--text-primary)]">Daily Briefing</h2>
+                    <p class="text-[var(--text-secondary)] ui-font">Wednesday, Feb 11, 2026</p>
+                </div>
+
+                <!-- Topic Chips (Paper Style) -->
+                <div class="flex flex-wrap items-center gap-3 mb-10 ui-font">
+                    <button class="px-4 py-1.5 rounded-full border border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-main)] text-sm font-medium shadow-sm transition-transform active:scale-95">All Topics</button>
+                    <button class="px-4 py-1.5 rounded-full border border-[var(--border-color)] text-[var(--text-secondary)] text-sm font-medium hover:border-[var(--text-secondary)] bg-transparent transition-colors">AI Policy</button>
+                    <button class="px-4 py-1.5 rounded-full border border-[var(--border-color)] text-[var(--text-secondary)] text-sm font-medium hover:border-[var(--text-secondary)] bg-transparent transition-colors">Semiconductors</button>
+                    <button class="px-4 py-1.5 rounded-full border border-[var(--border-color)] text-[var(--text-secondary)] text-sm font-medium hover:border-[var(--text-secondary)] bg-transparent transition-colors">Crypto Markets</button>
+                    
+                    <div class="flex-1"></div>
+                    <button class="text-xs flex items-center space-x-1 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                        <span>Refresh Brief</span>
+                    </button>
+                </div>
+
+                <!-- Feed Content Layout: Newspaper Columns -->
+                <div class="grid grid-cols-1 lg:grid-cols-12 gap-10">
+                    
+                    <!-- 主栏：简讯卡片 (占用8列) -->
+                    <div class="lg:col-span-8 space-y-12">
+                        <!-- Card 1 -->
+                        <article class="group relative">
+                            <div class="absolute -left-6 top-1 w-1 h-full border-l-2 border-[var(--border-color)] group-hover:border-[var(--text-primary)] transition-colors hidden md:block"></div>
+                            
+                            <div class="flex justify-between items-start mb-3 ui-font">
+                                <span class="text-xs font-bold tracking-wide uppercase text-[var(--text-tertiary)]">AI Policy • EU Region</span>
+                                <div class="flex items-center space-x-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button class="text-[var(--text-tertiary)] hover:text-green-600 transition-colors"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5"></path></svg></button>
+                                    <button class="text-[var(--text-tertiary)] hover:text-red-600 transition-colors"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14H5.236a2 2 0 01-1.789-2.894l3.5-7A2 2 0 018.736 3h4.018a2 2 0 01.485.06l3.76.94m-7 10v5a2 2 0 002 2h.095c.5 0 .905-.405.905-.905 0-.714.211-1.412.608-2.006L17 13V4m-7 10h2"></path></svg></button>
+                                </div>
+                            </div>
+
+                            <h3 class="text-2xl font-serif font-bold leading-tight mb-4 text-[var(--text-primary)]">
+                                EU AI Act enters final implementation phase with new compliance tiers for Generative Models
+                            </h3>
+                            
+                            <p class="text-lg text-[var(--text-secondary)] leading-relaxed mb-6 font-serif">
+                                The European Commission has officially released the technical standards for "High-Impact General Purpose AI Models." Key changes include a mandatory transparency registry and stricter copyright compliance checks before model training.
+                            </p>
+
+                            <div class="bg-[var(--bg-sidebar)] p-4 rounded-sm border border-[var(--border-color)] mb-4">
+                                <h4 class="ui-font text-xs font-bold uppercase text-[var(--text-secondary)] mb-2">Key Takeaways</h4>
+                                <ul class="space-y-2 ui-font text-sm text-[var(--text-secondary)]">
+                                    <li class="flex items-start"><span class="mr-2 text-[var(--text-tertiary)]">•</span> Compliance deadline set for August 2026.</li>
+                                    <li class="flex items-start"><span class="mr-2 text-[var(--text-tertiary)]">•</span> Fines up to 7% of global turnover for non-compliance.</li>
+                                </ul>
+                            </div>
+
+                            <div class="flex items-center space-x-4 ui-font text-xs text-[var(--text-tertiary)]">
+                                <span class="flex items-center"><svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20"><path d="M10 12a2 2 0 100-4 2 2 0 000 4z"/><path fill-rule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clip-rule="evenodd"/></svg> TechCrunch</span>
+                                <span>•</span>
+                                <span>2 hours ago</span>
+                            </div>
+                        </article>
+                    </div>
+
+                    <!-- 侧栏：Source & History (占用4列) -->
+                    <div class="lg:col-span-4 pl-0 lg:pl-8 border-l border-[var(--border-color)]">
+                        <div class="sticky top-0">
+                            <h4 class="ui-font text-xs font-bold uppercase text-[var(--text-tertiary)] mb-6">Recent Sources (48h)</h4>
+                            <ul class="space-y-4">
+                                <li class="group cursor-pointer">
+                                    <div class="text-sm font-medium text-[var(--text-primary)] group-hover:underline ui-font">The Verge</div>
+                                    <div class="text-xs text-[var(--text-secondary)] mt-0.5 font-serif truncate">OpenAI releases new safety guidelines...</div>
+                                    <div class="text-[10px] text-[var(--text-tertiary)] mt-1 ui-font">14:20 PM • Source Reliability: High</div>
+                                </li>
+                                <li class="group cursor-pointer">
+                                    <div class="text-sm font-medium text-[var(--text-primary)] group-hover:underline ui-font">Reuters</div>
+                                    <div class="text-xs text-[var(--text-secondary)] mt-0.5 font-serif truncate">Nvidia stock surges after earnings...</div>
+                                    <div class="text-[10px] text-[var(--text-tertiary)] mt-1 ui-font">11:05 AM • Source Reliability: High</div>
+                                </li>
+                            </ul>
+                            <button class="mt-8 w-full py-2 border border-[var(--border-color)] rounded text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-element)] transition-colors ui-font">
+                                View Source Registry
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MODULE B: DEEP RESEARCH (深度搜索) -->
+
+        </div>
+    </main>
+    <button onclick="toggleTheme()" class="fixed bottom-6 right-6 w-10 h-10 rounded-full bg-[var(--text-primary)] text-[var(--bg-main)] shadow-lg flex items-center justify-center hover:scale-110 transition-transform z-50">
+        <svg id="themeIcon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
+    </button>
+    <script src="./paper-theme.js"></script>
+</body>
+</html>

@@ -134,6 +134,13 @@ class ArcBriefScheduler:
                 continue
             self._add_collection_job(topic)
             self._add_daily_brief_job(topic)
+        # Daily cleanup: remove articles older than 30 days
+        self.scheduler.add_job(
+            self._cleanup_task,
+            trigger=CronTrigger(hour=2, minute=0),
+            id="cleanup_old_articles",
+            replace_existing=True,
+        )
 
     def _add_collection_job(self, topic) -> None:
         job_id = f"collect_{topic.id}"
@@ -163,24 +170,35 @@ class ArcBriefScheduler:
         topic = self.db.get_topic(topic_id)
         if not topic:
             return
+        started = datetime.now().isoformat()
         try:
-            items = collect_for_topic(topic, self.collector)
+            result = collect_for_topic(topic, self.collector)
+            items = result["items"]
+            for h in result.get("rss_health", []):
+                self.db.upsert_rss_health(topic.id, h["rss_url"], h["status"], h["items_fetched"], last_error=h.get("last_error"))
             saved = self.db.save_articles(topic.id, items)
+            self.db.log_brief_run(topic.id, "collect", "ok", len(items), saved, started_at=started)
             logger.info(f"Collection for '{topic.name}': {len(items)} items, {saved} saved")
         except Exception as e:
+            self.db.log_brief_run(topic.id, "collect", "failed", error_message=str(e), started_at=started)
             logger.error(f"Collection failed for '{topic.name}': {e}")
 
     def _brief_task(self, topic_id: int) -> None:
         topic = self.db.get_topic(topic_id)
         if not topic:
             return
-
-        items = self.db.get_recent_articles(topic_id, hours=24)
-        brief = build_brief_for_topic(topic, items)
-        date_str = datetime.now().strftime("%Y-%m-%d")
-        self.db.save_brief(topic_id, date_str, brief, len(items))
-
-        logger.info(f"Brief generated for topic {topic.name}: {len(items)} articles")
+        started = datetime.now().isoformat()
+        brief_hours = int(os.getenv("ARCBRIEF_NEWS_MAX_AGE_HOURS", "48"))
+        try:
+            items = self.db.get_recent_articles(topic_id, hours=brief_hours)
+            brief = build_brief_for_topic(topic, items)
+            date_str = datetime.now().strftime("%Y-%m-%d")
+            self.db.save_brief(topic_id, date_str, brief, len(items))
+            self.db.log_brief_run(topic.id, "brief", "ok", items_collected=len(items), started_at=started)
+            logger.info(f"Brief generated for topic {topic.name}: {len(items)} articles")
+        except Exception as e:
+            self.db.log_brief_run(topic.id, "brief", "failed", error_message=str(e), started_at=started)
+            logger.error(f"Brief generation failed for '{topic.name}': {e}")
 
         # Discord推送
         if self.discord.enabled and "discord" in topic.push_channels:
@@ -192,6 +210,14 @@ class ArcBriefScheduler:
                 logger.info(f"Discord push success for topic {topic.name}")
             else:
                 logger.warning(f"Discord push failed for topic {topic.name}")
+
+    def _cleanup_task(self) -> None:
+        try:
+            deleted = self.db.cleanup_old_articles(days=30)
+            if deleted > 0:
+                logger.info(f"Cleanup: removed {deleted} articles older than 30 days")
+        except Exception as e:
+            logger.error(f"Cleanup failed: {e}")
 
     def refresh_jobs(self) -> None:
         self.scheduler.remove_all_jobs()

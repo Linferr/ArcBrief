@@ -1,0 +1,190 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ArcBrief - Deep Research</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@0,300;0,400;0,700;0,900;1,300&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./paper-theme.css">
+</head>
+<body class="h-screen flex overflow-hidden">
+    <aside class="sidebar w-64 flex-shrink-0 flex flex-col pt-8 pb-6 ui-font transition-colors duration-300">
+        <div class="px-6 mb-8">
+            <h1 class="text-xl font-bold tracking-tight flex items-center gap-2">
+                <span class="w-2 h-6 bg-[var(--text-primary)] block"></span>
+                ArcBrief
+            </h1>
+            <p class="text-xs text-[var(--text-tertiary)] mt-1 tracking-wider uppercase pl-4">Intelligence Desk</p>
+        </div>
+        <nav class="flex-1 px-4 space-y-1">
+            <a href="./daily-brief.html" class="nav-item w-full text-left px-3 py-2.5 rounded-md text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-element)] transition-all flex items-center group ">
+                <span class="w-5 text-center mr-3 opacity-60">&#128240;</span>
+                Daily Brief
+            </a>
+            <a href="./deep-research.html" class="nav-item w-full text-left px-3 py-2.5 rounded-md text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-element)] transition-all flex items-center group nav-active">
+                <span class="w-5 text-center mr-3 opacity-60">&#128269;</span>
+                Deep Research
+            </a>
+            <a href="./settings.html" class="nav-item w-full text-left px-3 py-2.5 rounded-md text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-element)] transition-all flex items-center group ">
+                <span class="w-5 text-center mr-3 opacity-60">&#9881;</span>
+                Settings
+            </a>
+            <div class="pt-4 mt-4 border-t border-[var(--border-color)]">
+                <div class="px-3 text-xs font-medium text-[var(--text-tertiary)] uppercase mb-2">Library</div>
+                <button class="w-full text-left px-3 py-2 rounded-md text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-element)] transition-all flex items-center">
+                    <span class="w-5 text-center mr-3 opacity-60">&#128194;</span>
+                    Archives
+                </button>
+            </div>
+        </nav>
+        <div class="px-6 ui-font">
+            <button class="flex items-center space-x-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
+                <div class="w-2 h-2 rounded-full bg-green-500"></div>
+                <span>System Operational</span>
+            </button>
+        </div>
+    </aside>
+    <main class="flex-1 overflow-hidden relative flex flex-col">
+        <header class="h-16 flex items-center justify-between px-8 md:px-12 border-b border-[var(--border-color)] bg-[var(--bg-main)]/80 backdrop-blur-sm z-10 transition-colors duration-300">
+            <div class="ui-font text-sm text-[var(--text-tertiary)] flex items-center">
+                <span>Workspace</span>
+                <span class="mx-2">/</span>
+                <span id="header-breadcrumb" class="text-[var(--text-primary)] font-medium">Deep Research</span>
+            </div>
+            <div class="flex items-center space-x-4 ui-font">
+                <span class="text-xs text-[var(--text-tertiary)] border border-[var(--border-color)] px-2 py-1 rounded">v2.4.0</span>
+                <div class="w-8 h-8 rounded-full bg-[var(--bg-element)] flex items-center justify-center text-xs font-bold border border-[var(--border-color)]">OP</div>
+            </div>
+        </header>
+        <div class="flex-1 overflow-y-auto overflow-x-hidden p-8 md:p-12 scroll-smooth" id="content-container">
+
+<div id="module-research" class="max-w-4xl mx-auto block">
+                <!-- Input Section -->
+                <div class="mb-12">
+                    <label class="block text-2xl font-serif font-bold text-[var(--text-primary)] mb-4">Research Run</label>
+                    <p class="text-[var(--text-secondary)] mb-6 ui-font">Ask a question. The agent will search, reflect, and draft a report.</p>
+                    <div class="relative group">
+                        <input type="text" 
+                               class="custom-input w-full bg-transparent text-xl font-serif py-4 border-b-2 border-[var(--border-color)] placeholder-[var(--text-tertiary)] transition-colors text-[var(--text-primary)]" 
+                               placeholder="Latest AI policy shifts in the US and EU..."
+                               value="Latest AI policy shifts in the US and EU"
+                        >
+                        <button class="absolute right-0 top-4 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors ui-font text-sm font-medium bg-[var(--bg-element)] px-3 py-1 rounded">
+                            Start Research ↵
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Two Column Layout for Progress & Preview -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-12">
+                    <!-- Left: Pipeline Progress -->
+                    <div>
+                        <h4 class="ui-font text-xs font-bold uppercase text-[var(--text-tertiary)] mb-6 tracking-widest">Pipeline Progress</h4>
+                        <div class="relative pl-4 border-l border-[var(--border-color)] space-y-8">
+                            <!-- Step 1: Done -->
+                            <div class="relative">
+                                <div class="absolute -left-[21px] top-1 w-3 h-3 rounded-full bg-emerald-600 border-2 border-[var(--bg-main)]"></div>
+                                <h5 class="text-sm font-medium text-[var(--text-primary)] ui-font">Query Decomposition</h5>
+                                <div class="mt-2 text-sm text-[var(--text-secondary)] font-serif">
+                                    Identified 3 core sub-questions. <span class="highlight-mark">Completed</span>
+                                </div>
+                            </div>
+                            <!-- Step 2: Active -->
+                            <div class="relative">
+                                <div class="absolute -left-[21px] top-1 w-3 h-3 rounded-full bg-emerald-600 border-2 border-[var(--bg-main)] animate-pulse"></div>
+                                <h5 class="text-sm font-medium text-[var(--text-primary)] ui-font">Deep Web Extraction</h5>
+                                <div class="mt-2 text-sm text-[var(--text-secondary)] font-serif">
+                                    Reading <span class="italic">"EU AI Act Final Draft"</span>...
+                                    <div class="w-full bg-[var(--border-color)] h-1 mt-3 rounded-full overflow-hidden">
+                                        <div class="bg-emerald-600 h-full w-2/3 rounded-full"></div>
+                                    </div>
+                                    <div class="mt-2 flex gap-2">
+                                        <span class="highlight-mark text-[10px]">Processing Source 4/12</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- Step 3: Pending -->
+                            <div class="relative opacity-50">
+                                <div class="absolute -left-[21px] top-1 w-3 h-3 rounded-full bg-[var(--border-color)] border-2 border-[var(--bg-main)]"></div>
+                                <h5 class="text-sm font-medium text-[var(--text-primary)] ui-font">Synthesis & Reporting</h5>
+                                <div class="mt-2 text-sm text-[var(--text-secondary)] font-serif">
+                                    Waiting for extraction...
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Recent History -->
+                        <div class="mt-16 pt-8 border-t border-[var(--border-color)]">
+                            <h4 class="ui-font text-xs font-bold uppercase text-[var(--text-tertiary)] mb-4 tracking-widest">Recent Runs</h4>
+                            <ul class="space-y-3">
+                                <li class="flex items-center justify-between group cursor-pointer p-2 -mx-2 hover:bg-[var(--bg-element)] rounded transition-colors">
+                                    <div class="flex items-center">
+                                        <span class="w-2 h-2 rounded-full bg-green-500 mr-3"></span>
+                                        <span class="text-sm text-[var(--text-secondary)] ui-font group-hover:text-[var(--text-primary)]">Impact of Solid State Batteries</span>
+                                    </div>
+                                    <span class="text-xs text-[var(--text-tertiary)] ui-font">2h ago</span>
+                                </li>
+                                <li class="flex items-center justify-between group cursor-pointer p-2 -mx-2 hover:bg-[var(--bg-element)] rounded transition-colors">
+                                    <div class="flex items-center">
+                                        <span class="w-2 h-2 rounded-full bg-red-400 mr-3"></span>
+                                        <span class="text-sm text-[var(--text-secondary)] ui-font group-hover:text-[var(--text-primary)]">Quantum Computing Timeline</span>
+                                    </div>
+                                    <span class="text-xs text-[var(--text-tertiary)] ui-font">Failed • Retry</span>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <!-- Right: Report Preview (The "Paper") -->
+                    <div>
+                        <div class="flex items-center justify-between mb-6">
+                            <h4 class="ui-font text-xs font-bold uppercase text-[var(--text-tertiary)] tracking-widest">Report Preview</h4>
+                            <div class="flex space-x-2">
+                                <button class="text-xs font-medium text-[var(--text-primary)] border border-[var(--border-color)] px-3 py-1 rounded hover:bg-[var(--bg-element)] ui-font transition-colors">Full Report</button>
+                                <button class="text-xs font-medium text-[var(--text-primary)] border border-[var(--border-color)] px-3 py-1 rounded hover:bg-[var(--bg-element)] ui-font transition-colors">Export PDF</button>
+                            </div>
+                        </div>
+                        <div class="bg-[var(--bg-sidebar)] border border-[var(--border-color)] p-8 min-h-[500px] paper-shadow rounded-sm relative overflow-hidden">
+                            <!-- Header of Report -->
+                            <div class="border-b border-stone-300 pb-4 mb-6">
+                                <h2 class="font-serif text-xl font-bold text-[var(--text-primary)]">Regulatory Divergence in AI: US vs EU</h2>
+                                <div class="mt-2 text-xs text-[var(--text-secondary)] ui-font flex justify-between">
+                                    <span>Generated by ArcBrief Agent</span>
+                                    <span>Feb 11, 2026</span>
+                                </div>
+                            </div>
+                            <!-- Body of Report -->
+                            <div class="space-y-4">
+                                <p class="text-sm font-serif leading-relaxed text-[var(--text-secondary)] text-justify">
+                                    <strong class="text-[var(--text-primary)]">Executive Summary:</strong> The European Union has moved towards a comprehensive, risk-based legislative framework with the AI Act, whereas the United States maintains a more fragmented, sector-specific approach driven by Executive Orders and voluntary commitments from major tech labs.
+                                </p>
+                                <h3 class="text-base font-serif font-bold text-[var(--text-primary)] mt-6 mb-2">1. The EU AI Act Implementation</h3>
+                                <p class="text-sm font-serif leading-relaxed text-[var(--text-secondary)] text-justify">
+                                    The Act categorizes AI systems into risk tiers. <span class="bg-yellow-100 px-1 text-stone-800">Unacceptable risk</span> systems are banned outright. High-risk systems face strict conformity assessments.
+                                </p>
+                                <!-- Streaming Cursor Effect -->
+                                <p class="text-sm font-serif leading-relaxed text-[var(--text-secondary)] mt-4">
+                                    Currently analyzing the specific impact on open-source models...
+                                    <span class="inline-block w-1.5 h-4 bg-[var(--text-primary)] ml-1 animate-pulse align-middle"></span>
+                                </p>
+                            </div>
+                            <!-- Watermark/Footer -->
+                            <div class="absolute bottom-4 right-6 text-[10px] text-[var(--text-tertiary)] mono-font opacity-50">
+                                REF: ID-9928-XJ
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MODULE C: SETTINGS (配置) -->
+
+        </div>
+    </main>
+    <button onclick="toggleTheme()" class="fixed bottom-6 right-6 w-10 h-10 rounded-full bg-[var(--text-primary)] text-[var(--bg-main)] shadow-lg flex items-center justify-center hover:scale-110 transition-transform z-50">
+        <svg id="themeIcon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
+    </button>
+    <script src="./paper-theme.js"></script>
+</body>
+</html>

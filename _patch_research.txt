@@ -1,0 +1,72 @@
+﻿@@
+-  const [maxReflections, setMaxReflections] = useState(3);
++  const [maxReflections, setMaxReflections] = useState(3);
++  const [previewRunId, setPreviewRunId] = useState<string | null>(null);
++  const [previewTitle, setPreviewTitle] = useState('');
++  const [previewReport, setPreviewReport] = useState('');
++  const [previewLoading, setPreviewLoading] = useState(false);
+@@
+-  const openReport = async (run: RunSummary) => {
++  const openReport = async (run: RunSummary) => {
+@@
+   };
++
++  const previewFromHistory = async (run: RunSummary) => {
++    setPreviewRunId(run.run_id);
++    setPreviewTitle(run.query);
++    setPreviewLoading(true);
++    setPreviewReport('');
++    try {
++      const res = await apiFetch(`/report/${run.run_id}`);
++      setPreviewReport(res.ok ? await res.text() : 'Report not found.');
++    } catch {
++      setPreviewReport('Report load failed.');
++    }
++    setPreviewLoading(false);
++  };
++
++  const clearPreview = () => {
++    setPreviewRunId(null);
++    setPreviewTitle('');
++    setPreviewReport('');
++    setPreviewLoading(false);
++  };
+@@
+-  const progressLabel = lastWithParagraph
++  const progressLabel = lastWithParagraph
+     ? `Paragraph ${lastWithParagraph.paragraph_idx}/${totalParagraphs} 路 ${stageLabelMap[stageNow] || stageNow} (Round ${currentRound}/${totalRounds})`
+     : `Stage: ${stageLabelMap[stageNow] || stageNow}`;
++  const activePreview = previewRunId ? previewReport : report;
++  const previewHeader = previewRunId ? `Report Preview · ${previewTitle}` : 'Report Preview';
+@@
+-          <h3>Report Preview</h3>
++          <h3>{previewHeader}</h3>
+           <div className="report-actions">
+             <button className="ghost" onClick={() => runId && openReport({ run_id: runId, query, status })} disabled={!runId}>Full Report</button>
+             {runId && <button className="ghost-link" onClick={() => downloadReport(runId)}>Download</button>}
++            {previewRunId && <button className="ghost" onClick={clearPreview}>Clear Preview</button>}
+           </div>
+-          {report ? <pre className="report-preview">{report.split('\n').slice(0, 22).join('\n')}</pre> : <div className="muted">No report yet.</div>}
++          {previewLoading && <div className="muted">Loading preview...</div>}
++          {!previewLoading && activePreview ? (
++            <pre className="report-preview">{activePreview.split('\n').slice(0, 22).join('\n')}</pre>
++          ) : (
++            !previewLoading && <div className="muted">No report yet.</div>
++          )}
+@@
+-            <div key={h.run_id} className="history-item">
++            <div key={h.run_id} className="history-item clickable" onClick={() => previewFromHistory(h)}>
+               <div>
+                 <div className="history-title">{h.query}</div>
+                 <div className="muted">{h.status}{h.created_at ? ` 路 ${new Date(h.created_at).toLocaleString()}` : ''}</div>
+               </div>
+               <div className="history-actions">
+-                {h.status === 'failed' && <button onClick={() => { setQuery(h.query); startRun(); }}>Retry</button>}
+-                <button onClick={() => openReport(h)}>Full Report</button>
+-                <button onClick={() => downloadReport(h.run_id)}>Download</button>
++                {h.status === 'failed' && <button onClick={(e) => { e.stopPropagation(); setQuery(h.query); startRun(); }}>Retry</button>}
++                <button onClick={(e) => { e.stopPropagation(); openReport(h); }}>Full Report</button>
++                <button onClick={(e) => { e.stopPropagation(); downloadReport(h.run_id); }}>Download</button>
+               </div>
+             </div>
+@@

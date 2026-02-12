@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Brief Card Preview</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@0,300;0,400;0,700;0,900;1,300&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <style>
+        body { background-color: #FBF8F1; color: #2D2D2D; }
+        .font-serif { font-family: 'Merriweather', serif; }
+        .font-sans { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="p-8">
+
+    <!-- 单条简讯卡片容器 -->
+    <article class="max-w-3xl mx-auto mb-12 border-l-2 border-stone-300 pl-6 pb-6 relative group">
+        
+        <!-- 1. 元数据头部 (UI化，无衬线，弱化视觉) -->
+        <div class="flex items-center justify-between mb-3 font-sans">
+            <div class="flex items-center space-x-3 text-xs font-bold uppercase tracking-wide text-stone-500">
+                <span>ELECTION • SOUTH ASIA</span>
+                <span class="text-stone-300">|</span>
+                <span>Feb 12, 2026</span>
+            </div>
+            
+            <!-- 操作/状态图标 -->
+            <div class="flex items-center space-x-4 opacity-60">
+                <span class="flex items-center text-xs text-stone-500"><svg class="w-4 h-4 mr-1 text-stone-400" fill="currentColor" viewBox="0 0 20 20"><path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"/><path fill-rule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H7zm3 0a1 1 0 100 2h3a1 1 0 100-2h-3z" clip-rule="evenodd"/></svg> 7 Articles</span>
+                <div class="flex items-center space-x-2">
+                    <button class="hover:text-stone-800 transition-colors"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5"></path></svg></button>
+                    <button class="hover:text-stone-800 transition-colors"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14H5.236a2 2 0 01-1.789-2.894l3.5-7A2 2 0 018.736 3h4.018a2 2 0 01.485.06l3.76.94m-7 10v5a2 2 0 002 2h.095c.5 0 .905-.405.905-.905 0-.714.211-1.412.608-2.006L17 13V4m-7 10h2"></path></svg></button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 2. 核心大标题 (拉开字号差距) -->
+        <h3 class="text-2xl font-serif font-bold leading-snug mb-3 text-stone-900">
+            Bangladesh holds pivotal election after 2024 uprising
+        </h3>
+        
+        <!-- 3. 正文摘要 (高可读性行高) -->
+        <p class="text-[17px] text-stone-700 leading-relaxed mb-6 font-serif">
+            Bangladesh conducts its first national election since the 2024 Gen Z-led uprising ousted PM Sheikh Hasina, with polls marked by high turnout and a direct contest between BNP’s Tarique Rahman and a Jamaat-e-Islami coalition.
+        </p>
+
+        <!-- 4. Key Takeaways (区块化隔离) -->
+        <div class="bg-[#F4EFE6] px-5 py-4 rounded-sm border border-[#E6E0D0] mb-6">
+            <h4 class="font-sans text-[11px] font-bold uppercase text-stone-500 mb-3 tracking-widest">Key Takeaways</h4>
+            <ul class="space-y-2 font-sans text-sm text-stone-700">
+                <li class="flex items-start">
+                    <span class="mr-2.5 text-stone-400 mt-0.5">▪</span>
+                    <span class="leading-relaxed">This is Bangladesh’s first election following the removal of long-serving Prime Minister Sheikh Hasina in a youth-driven uprising in 2024.</span>
+                </li>
+                <li class="flex items-start">
+                    <span class="mr-2.5 text-stone-400 mt-0.5">▪</span>
+                    <span class="leading-relaxed">The election features a major showdown between the BNP and an 11-party coalition led by Jamaat-e-Islami, under heavy security.</span>
+                </li>
+            </ul>
+        </div>
+
+        <!-- 5. 底部信息：Tags & 源数据 -->
+        <div class="flex flex-col space-y-4 pt-4 border-t border-stone-200/60 font-sans">
+            <!-- Sentiment & Relibility (徽章化) -->
+            <div class="flex items-center space-x-3 text-xs">
+                <span class="bg-stone-200 text-stone-700 px-2 py-0.5 rounded-sm font-medium">Sentiment: Neutral</span>
+                <span class="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-sm font-medium">Reliability: High</span>
+            </div>
+
+            <!-- Keywords -->
+            <div class="text-xs text-stone-500">
+                <span class="font-semibold text-stone-700 mr-1">Keywords:</span> 
+                Breaking News, Geopolitics, Election, Policy Change
+            </div>
+
+            <!-- Sources (折叠或精简呈现) -->
+            <details class="text-xs text-stone-500 cursor-pointer group">
+                <summary class="font-semibold text-stone-700 hover:text-stone-900 outline-none list-none flex items-center">
+                    <svg class="w-3 h-3 mr-1 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                    View Sources (4)
+                </summary>
+                <ul class="mt-3 pl-4 space-y-2 border-l border-stone-200 text-stone-600">
+                    <li><a href="#" class="hover:underline">Al Jazeera</a>: 'Colonial-era classism': Residents decry demolitions...</li>
+                    <li><a href="#" class="hover:underline">Al Jazeera</a>: Iran’s Larijani accuses Israel of trying to sabotage...</li>
+                    <li><a href="#" class="hover:underline">Al Jazeera</a>: To Die for Palestine – Ep 2</li>
+                    <li><a href="#" class="hover:underline">Al Jazeera</a>: North Korea’s Kim Jong Un sets stage for daughter...</li>
+                </ul>
+            </details>
+        </div>
+
+    </article>
+
+</body>
+</html>

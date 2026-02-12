@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent Workspace - FR Insight</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@0,300;0,400;0,700;1,300&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+    
+    <style>
+        /* * 定义两套颜色/字体变量 
+         * 默认：暖色/纸张风格 (Warm)
+         */
+        :root {
+            --bg-main: #FBF8F1;
+            --bg-sidebar: #F4EFE6;
+            --border-color: #E6E0D0;
+            --text-primary: #2D2D2D;
+            --text-secondary: #57534E;
+            --text-muted: #A8A29E;
+            --font-body: 'Merriweather', serif; /* 关键：衬线体 */
+            --font-ui: 'Inter', sans-serif;
+            --highlight-bg: #D1FAE5;
+            --highlight-text: #065F46;
+            --hover-bg: #EBE5D9;
+            --input-bg: #EBE5D9;
+        }
+
+        /* 冷色/现代风格 (Cool) - 类似 ChatGPT/SaaS */
+        [data-theme="cool"] {
+            --bg-main: #FFFFFF;
+            --bg-sidebar: #F9FAFB;
+            --border-color: #E5E7EB;
+            --text-primary: #111827;
+            --text-secondary: #4B5563;
+            --text-muted: #9CA3AF;
+            --font-body: 'Inter', sans-serif; /* 关键：无衬线体 */
+            --font-ui: 'Inter', sans-serif;
+            --highlight-bg: #F3F4F6;
+            --highlight-text: #1F2937;
+            --hover-bg: #F3F4F6;
+            --input-bg: #F3F4F6;
+        }
+
+        body {
+            background-color: var(--bg-main);
+            color: var(--text-primary);
+            font-family: var(--font-body);
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+
+        .sidebar {
+            background-color: var(--bg-sidebar);
+            border-right: 1px solid var(--border-color);
+            font-family: var(--font-ui); /* 侧边栏始终保持UI字体，更易读 */
+        }
+
+        .ui-font {
+            font-family: var(--font-ui);
+        }
+
+        .highlight-badge {
+            background-color: var(--highlight-bg);
+            color: var(--highlight-text);
+        }
+
+        .nav-item:hover {
+            background-color: var(--hover-bg);
+        }
+
+        .search-input {
+            background-color: var(--input-bg);
+        }
+
+        /* 自定义滚动条，使其融入背景 */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background-color: rgba(0,0,0,0.1);
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body class="h-screen flex overflow-hidden selection:bg-stone-200 selection:text-stone-900">
+
+    <!-- Sidebar -->
+    <aside class="sidebar w-64 flex-shrink-0 flex flex-col pt-5 pb-4 transition-colors duration-300">
+        <div class="px-4 mb-6">
+            <!-- Search Bar -->
+            <div class="search-input flex items-center rounded-lg px-3 py-2 text-sm transition-colors duration-300">
+                <svg class="w-4 h-4 mr-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                <input type="text" placeholder="Search" class="bg-transparent border-none focus:ring-0 w-full text-[var(--text-secondary)] placeholder-[var(--text-muted)] focus:outline-none h-full">
+                <span class="text-xs opacity-40 font-mono border border-[var(--text-muted)] rounded px-1 ml-1">⌘K</span>
+            </div>
+        </div>
+
+        <!-- Navigation -->
+        <nav class="flex-1 px-2 space-y-1 overflow-y-auto">
+            <div class="px-2 mb-2 text-xs font-semibold uppercase tracking-wider opacity-40 ui-font">Space</div>
+            
+            <a href="#" class="nav-item group flex items-center px-2 py-2 text-sm font-medium rounded-md text-[var(--text-secondary)] transition-colors">
+                <span class="mr-3 opacity-70">⚡</span>
+                FR Insight
+            </a>
+            <a href="#" class="nav-item group flex items-center px-2 py-2 text-sm font-medium rounded-md text-[var(--text-secondary)] transition-colors">
+                <span class="mr-3 opacity-70">🌊</span>
+                Auto Kafka
+            </a>
+            <a href="#" class="nav-item group flex items-center px-2 py-2 text-sm font-medium rounded-md text-[var(--text-secondary)] transition-colors">
+                <span class="mr-3 opacity-70">💡</span>
+                Idea Analyzer
+            </a>
+            <a href="#" class="nav-item group flex items-center px-2 py-2 text-sm font-medium rounded-md text-[var(--text-secondary)] transition-colors">
+                <span class="mr-3 opacity-70">🎙️</span>
+                Podcast Analyzer
+            </a>
+            <a href="#" class="nav-item group flex items-center px-2 py-2 text-sm font-medium rounded-md text-[var(--text-secondary)] transition-colors">
+                <span class="mr-3 opacity-70">📊</span>
+                Data Analyzer
+            </a>
+        </nav>
+
+        <!-- User Profile (Bottom) -->
+        <div class="px-4 pt-4 border-t border-[var(--border-color)]">
+            <div class="flex items-center">
+                <div class="h-8 w-8 rounded bg-gradient-to-tr from-stone-400 to-stone-600 flex items-center justify-center text-white text-xs font-bold shadow-sm">AI</div>
+                <div class="ml-3">
+                    <p class="text-sm font-medium text-[var(--text-primary)] ui-font">Agent Operator</p>
+                    <p class="text-xs text-[var(--text-muted)] ui-font">View Profile</p>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 overflow-y-auto focus:outline-none relative">
+        <div class="max-w-4xl mx-auto px-8 py-12 md:px-12">
+            
+            <!-- Breadcrumb -->
+            <nav class="flex items-center text-sm text-[var(--text-muted)] mb-8 ui-font" aria-label="Breadcrumb">
+                <span>Space</span>
+                <svg class="flex-shrink-0 h-4 w-4 text-[var(--border-color)] mx-2" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                    <path d="M5.555 17.776l8-16 .894.448-8 16-.894-.448z" />
+                </svg>
+                <span class="text-[var(--text-secondary)] font-medium">FR Insight</span>
+            </nav>
+
+            <!-- Content Body -->
+            <article class="prose prose-stone max-w-none">
+                <!-- Paragraph 1 -->
+                <p class="text-lg leading-relaxed mb-8">
+                    <span class="text-[var(--text-muted)] italic">...where we left off. Now let me check what analysis files exist and where we are in the workflow.</span><br>
+                    现在我理解了状态，这是一个 <strong class="font-bold">Mode B 纵向分析</strong>（阿里巴巴 FY2025 年报 + 1H FY2026 中期报告）。
+                </p>
+
+                <!-- Status Section -->
+                <div class="mb-10">
+                    <h3 class="text-xl font-bold mb-4 tracking-tight">已完成:</h3>
+                    <ul class="space-y-3 list-none pl-1">
+                        <li class="flex items-start">
+                            <svg class="w-5 h-5 mr-3 text-emerald-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><circle cx="10" cy="10" r="4"/></svg>
+                            <span>Phase 0: Scout <span class="highlight-badge px-1.5 py-0.5 rounded text-sm ml-1 ui-font">manifest 文件已生成</span></span>
+                        </li>
+                        <li class="flex items-start">
+                            <svg class="w-5 h-5 mr-3 text-emerald-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><circle cx="10" cy="10" r="4"/></svg>
+                            <span>Phase 1: Extraction <span class="highlight-badge px-1.5 py-0.5 rounded text-sm ml-1 ui-font">两期报告的5个section都已提取</span></span>
+                        </li>
+                        <li class="flex items-start">
+                            <svg class="w-5 h-5 mr-3 text-emerald-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><circle cx="10" cy="10" r="4"/></svg>
+                            <span>Phase 2 Wave 1: 分析 <span class="highlight-badge px-1.5 py-0.5 rounded text-sm ml-1 ui-font">Growth/Cash/Value 已完成，2月10日</span></span>
+                        </li>
+                    </ul>
+                </div>
+
+                <!-- Note -->
+                <div class="pl-4 border-l-2 border-[var(--border-color)] mb-10">
+                    <p class="text-[var(--text-secondary)] italic">
+                        * 之前的纵向分析文件也存在 (longitudinal 版本)
+                    </p>
+                </div>
+
+                <!-- Missing Section -->
+                <div class="mb-10">
+                    <h3 class="text-xl font-bold mb-4 tracking-tight">缺失:</h3>
+                    <ul class="space-y-3 list-none pl-1">
+                        <li class="flex items-start opacity-60">
+                            <svg class="w-5 h-5 mr-3 text-[var(--text-muted)] mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" stroke-width="2"/></svg>
+                            <span>Phase 2 Wave 2: Rating 分析 (需基于 Wave 1 结果)</span>
+                        </li>
+                        <li class="flex items-start opacity-60">
+                            <svg class="w-5 h-5 mr-3 text-[var(--text-muted)] mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" stroke-width="2"/></svg>
+                            <span>Phase 3: HTML Dashboard (纵向对比看板)</span>
+                        </li>
+                        <li class="flex items-start opacity-60">
+                            <svg class="w-5 h-5 mr-3 text-[var(--text-muted)] mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" stroke-width="2"/></svg>
+                            <span>Phase 4: Delivery</span>
+                        </li>
+                    </ul>
+                </div>
+
+                <!-- Code Block Area -->
+                <div class="mt-8 pt-6 border-t border-[var(--border-color)]">
+                    <p class="mb-4">现有的文件列表：</p>
+                    <div class="bg-[var(--hover-bg)] p-4 rounded-md border border-[var(--border-color)] ui-font text-sm">
+                        <div class="flex items-center space-x-2 text-[var(--text-secondary)]">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                            <code class="font-mono text-sm">alibaba_analysis_rating.md</code>
+                        </div>
+                        <div class="flex items-center space-x-2 text-[var(--text-secondary)] mt-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                            <code class="font-mono text-sm">alibaba_analysis_rating_longitudinal.md</code>
+                            <span class="text-xs text-[var(--text-muted)] ml-2">(Updated Feb 9)</span>
+                        </div>
+                    </div>
+                </div>
+
+            </article>
+        </div>
+    </main>
+
+    <!-- Theme Toggle Button (Floating) -->
+    <button onclick="toggleTheme()" id="themeBtn" class="fixed bottom-8 right-8 p-3 rounded-full shadow-lg bg-[var(--text-primary)] text-[var(--bg-main)] hover:scale-110 transition-transform duration-200 z-50 focus:outline-none" title="Switch Theme">
+        <!-- Sun Icon (for Cool mode) -->
+        <svg id="sunIcon" class="w-6 h-6 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
+        <!-- Moon Icon (for Warm mode) -->
+        <svg id="moonIcon" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
+    </button>
+
+    <script>
+        const body = document.body;
+        const sunIcon = document.getElementById('sunIcon');
+        const moonIcon = document.getElementById('moonIcon');
+        
+        // 初始状态
+        let isWarm = true;
+
+        function toggleTheme() {
+            if (isWarm) {
+                // 切换到冷色调 (Cool Mode)
+                body.setAttribute('data-theme', 'cool');
+                sunIcon.classList.remove('hidden');
+                moonIcon.classList.add('hidden');
+                isWarm = false;
+            } else {
+                // 切换回暖色调 (Warm Mode)
+                body.removeAttribute('data-theme');
+                sunIcon.classList.add('hidden');
+                moonIcon.classList.remove('hidden');
+                isWarm = true;
+            }
+        }
+    </script>
+</body>
+</html>

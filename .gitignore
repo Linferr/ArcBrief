@@ -1,14 +1,35 @@
-﻿# ForeignAgentKit gitignore
+# Environment and secrets
 .env
+.env.local
+.env.*.local
+
+# Runtime outputs
 outputs/
 logs/
 _test_outputs/
+
+# Python
 __pycache__/
+.pytest_cache/
 .venv/
 *.pyc
-*.log
-# frontend
+*.pyo
+*.pyd
+
+# Databases and local state
+arcbrief.db
+arcbrief.db-shm
+arcbrief.db-wal
+
+# Node / Next.js
 frontend/node_modules/
 frontend/.next/
-# User personal docs
+.next/
+
+# Logs and temp
+*.log
+*.tmp
+*.swp
+
+# docs
 docs/

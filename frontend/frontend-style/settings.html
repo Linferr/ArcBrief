@@ -1,0 +1,199 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ArcBrief - Settings</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@0,300;0,400;0,700;0,900;1,300&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./paper-theme.css">
+</head>
+<body class="h-screen flex overflow-hidden">
+    <aside class="sidebar w-64 flex-shrink-0 flex flex-col pt-8 pb-6 ui-font transition-colors duration-300">
+        <div class="px-6 mb-8">
+            <h1 class="text-xl font-bold tracking-tight flex items-center gap-2">
+                <span class="w-2 h-6 bg-[var(--text-primary)] block"></span>
+                ArcBrief
+            </h1>
+            <p class="text-xs text-[var(--text-tertiary)] mt-1 tracking-wider uppercase pl-4">Intelligence Desk</p>
+        </div>
+        <nav class="flex-1 px-4 space-y-1">
+            <a href="./daily-brief.html" class="nav-item w-full text-left px-3 py-2.5 rounded-md text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-element)] transition-all flex items-center group ">
+                <span class="w-5 text-center mr-3 opacity-60">&#128240;</span>
+                Daily Brief
+            </a>
+            <a href="./deep-research.html" class="nav-item w-full text-left px-3 py-2.5 rounded-md text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-element)] transition-all flex items-center group ">
+                <span class="w-5 text-center mr-3 opacity-60">&#128269;</span>
+                Deep Research
+            </a>
+            <a href="./settings.html" class="nav-item w-full text-left px-3 py-2.5 rounded-md text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-element)] transition-all flex items-center group nav-active">
+                <span class="w-5 text-center mr-3 opacity-60">&#9881;</span>
+                Settings
+            </a>
+            <div class="pt-4 mt-4 border-t border-[var(--border-color)]">
+                <div class="px-3 text-xs font-medium text-[var(--text-tertiary)] uppercase mb-2">Library</div>
+                <button class="w-full text-left px-3 py-2 rounded-md text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-element)] transition-all flex items-center">
+                    <span class="w-5 text-center mr-3 opacity-60">&#128194;</span>
+                    Archives
+                </button>
+            </div>
+        </nav>
+        <div class="px-6 ui-font">
+            <button class="flex items-center space-x-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
+                <div class="w-2 h-2 rounded-full bg-green-500"></div>
+                <span>System Operational</span>
+            </button>
+        </div>
+    </aside>
+    <main class="flex-1 overflow-hidden relative flex flex-col">
+        <header class="h-16 flex items-center justify-between px-8 md:px-12 border-b border-[var(--border-color)] bg-[var(--bg-main)]/80 backdrop-blur-sm z-10 transition-colors duration-300">
+            <div class="ui-font text-sm text-[var(--text-tertiary)] flex items-center">
+                <span>Workspace</span>
+                <span class="mx-2">/</span>
+                <span id="header-breadcrumb" class="text-[var(--text-primary)] font-medium">System Config</span>
+            </div>
+            <div class="flex items-center space-x-4 ui-font">
+                <span class="text-xs text-[var(--text-tertiary)] border border-[var(--border-color)] px-2 py-1 rounded">v2.4.0</span>
+                <div class="w-8 h-8 rounded-full bg-[var(--bg-element)] flex items-center justify-center text-xs font-bold border border-[var(--border-color)]">OP</div>
+            </div>
+        </header>
+        <div class="flex-1 overflow-y-auto overflow-x-hidden p-8 md:p-12 scroll-smooth" id="content-container">
+
+<div id="module-settings" class="block max-w-4xl mx-auto pb-20">
+                <div class="mb-10">
+                    <h2 class="text-3xl font-serif font-bold mb-2 text-[var(--text-primary)]">Agent Protocol</h2>
+                    <p class="text-[var(--text-secondary)] ui-font">System Configuration & Directives</p>
+                </div>
+
+                <!-- Section 1: Intelligence Scope -->
+                <div class="mb-12">
+                    <h3 class="ui-font text-xs font-bold uppercase text-[var(--text-tertiary)] mb-6 tracking-widest border-b border-[var(--border-color)] pb-2">Intelligence Scope</h3>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8">
+                        <!-- Topics Configuration -->
+                        <div>
+                            <label class="block text-sm font-medium text-[var(--text-primary)] ui-font mb-3">Focus Topics</label>
+                            <div class="flex flex-wrap gap-2 mb-3">
+                                <span class="px-3 py-1 rounded bg-[var(--bg-element)] border border-[var(--border-color)] text-sm text-[var(--text-secondary)] flex items-center ui-font">
+                                    AI Policy <button class="ml-2 text-[var(--text-tertiary)] hover:text-red-500">×</button>
+                                </span>
+                                <span class="px-3 py-1 rounded bg-[var(--bg-element)] border border-[var(--border-color)] text-sm text-[var(--text-secondary)] flex items-center ui-font">
+                                    Semiconductors <button class="ml-2 text-[var(--text-tertiary)] hover:text-red-500">×</button>
+                                </span>
+                                <span class="px-3 py-1 rounded bg-[var(--bg-element)] border border-[var(--border-color)] text-sm text-[var(--text-secondary)] flex items-center ui-font">
+                                    Crypto <button class="ml-2 text-[var(--text-tertiary)] hover:text-red-500">×</button>
+                                </span>
+                            </div>
+                            <input type="text" placeholder="+ Add topic..." class="w-full bg-transparent border-b border-[var(--border-color)] py-2 text-sm ui-font focus:outline-none focus:border-[var(--text-primary)] placeholder-[var(--text-tertiary)]">
+                        </div>
+
+                        <!-- Keyword Watchlist -->
+                        <div>
+                            <label class="block text-sm font-medium text-[var(--text-primary)] ui-font mb-3">Priority Watchlist (Entities)</label>
+                            <p class="text-xs text-[var(--text-secondary)] mb-3 ui-font">Agent will prioritize retrieval of these specific entities.</p>
+                            <textarea class="w-full bg-[var(--bg-element)] border border-[var(--border-color)] rounded p-3 text-sm ui-font focus:outline-none h-24 resize-none" placeholder="e.g. Sam Altman, TSMC 3nm, GPT-5..."></textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Section 2: Agent Behavior -->
+                <div class="mb-12">
+                    <h3 class="ui-font text-xs font-bold uppercase text-[var(--text-tertiary)] mb-6 tracking-widest border-b border-[var(--border-color)] pb-2">Agent Behavior</h3>
+                    
+                    <div class="space-y-6">
+                        <!-- Source Filtering -->
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h4 class="text-base font-serif font-bold text-[var(--text-primary)]">Strict Academic Mode</h4>
+                                <p class="text-sm text-[var(--text-secondary)] ui-font mt-1">Exclude social media and forums. Only index journals, official reports, and reputable news.</p>
+                            </div>
+                            <div class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
+                                <input type="checkbox" name="toggle" id="toggle-academic" class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer border-[var(--border-color)] outline-none"/>
+                                <label for="toggle-academic" class="toggle-label block overflow-hidden h-6 rounded-full bg-[var(--bg-element)] cursor-pointer"></label>
+                            </div>
+                        </div>
+
+                        <!-- Critique Level -->
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h4 class="text-base font-serif font-bold text-[var(--text-primary)]">Critical Analysis Layer</h4>
+                                <p class="text-sm text-[var(--text-secondary)] ui-font mt-1">Force agent to identify counter-arguments and logical fallacies in retrieved data.</p>
+                            </div>
+                            <div class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
+                                <input type="checkbox" name="toggle" id="toggle-critique" checked class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer border-[var(--border-color)] outline-none"/>
+                                <label for="toggle-critique" class="toggle-label block overflow-hidden h-6 rounded-full bg-[var(--bg-element)] cursor-pointer"></label>
+                            </div>
+                        </div>
+
+                        <!-- Briefing Schedule -->
+                        <div class="grid grid-cols-2 gap-8 pt-4">
+                            <div>
+                                <label class="block text-sm font-medium text-[var(--text-primary)] ui-font mb-2">Daily Briefing Schedule (EST)</label>
+                                <select class="w-full bg-[var(--bg-element)] border border-[var(--border-color)] rounded px-3 py-2 text-sm ui-font focus:outline-none appearance-none">
+                                    <option>06:00 AM</option>
+                                    <option>07:00 AM</option>
+                                    <option selected>08:00 AM</option>
+                                    <option>09:00 AM</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-[var(--text-primary)] ui-font mb-2">Report Language</label>
+                                <select class="w-full bg-[var(--bg-element)] border border-[var(--border-color)] rounded px-3 py-2 text-sm ui-font focus:outline-none appearance-none">
+                                    <option selected>English (US)</option>
+                                    <option>Chinese (Simplified)</option>
+                                    <option>Japanese</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Section 3: API & System -->
+                <div class="mb-12">
+                    <h3 class="ui-font text-xs font-bold uppercase text-[var(--text-tertiary)] mb-6 tracking-widest border-b border-[var(--border-color)] pb-2">System Connectors</h3>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        <div>
+                            <label class="block text-sm font-medium text-[var(--text-primary)] ui-font mb-2">Primary LLM Model</label>
+                            <select class="w-full bg-[var(--bg-element)] border border-[var(--border-color)] rounded px-3 py-2 text-sm ui-font focus:outline-none appearance-none">
+                                <option selected>GPT-4o (OpenAI)</option>
+                                <option>Claude 3.5 Sonnet (Anthropic)</option>
+                                <option>Gemini 1.5 Pro (Google)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-[var(--text-primary)] ui-font mb-2">Search Provider</label>
+                            <select class="w-full bg-[var(--bg-element)] border border-[var(--border-color)] rounded px-3 py-2 text-sm ui-font focus:outline-none appearance-none">
+                                <option selected>Tavily Search API</option>
+                                <option>Serper (Google)</option>
+                                <option>Bing Search</option>
+                            </select>
+                        </div>
+                        <div class="col-span-1 md:col-span-2">
+                            <label class="block text-sm font-medium text-[var(--text-primary)] ui-font mb-2">OpenAI API Key</label>
+                            <div class="flex">
+                                <input type="password" value="sk-proj-xxxxxxxxxxxxxxxxxxxx" class="flex-1 bg-[var(--bg-element)] border border-[var(--border-color)] rounded-l px-3 py-2 text-sm mono-font focus:outline-none text-[var(--text-muted)]" disabled>
+                                <button class="px-4 py-2 bg-[var(--bg-sidebar)] border border-l-0 border-[var(--border-color)] rounded-r text-sm ui-font text-[var(--text-secondary)] hover:bg-[var(--bg-element)]">Edit</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Action Bar -->
+                <div class="flex justify-end pt-6">
+                    <button class="px-6 py-2.5 bg-[var(--text-primary)] text-[var(--bg-main)] rounded text-sm font-medium hover:opacity-90 transition-opacity shadow-lg ui-font">
+                        Save Configuration
+                    </button>
+                </div>
+            </div>
+
+        </div>
+
+        </div>
+    </main>
+    <button onclick="toggleTheme()" class="fixed bottom-6 right-6 w-10 h-10 rounded-full bg-[var(--text-primary)] text-[var(--bg-main)] shadow-lg flex items-center justify-center hover:scale-110 transition-transform z-50">
+        <svg id="themeIcon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
+    </button>
+    <script src="./paper-theme.js"></script>
+</body>
+</html>

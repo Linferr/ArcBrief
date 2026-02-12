@@ -1,0 +1,117 @@
+﻿/* 核心样式变量定义 */
+        :root {
+            --bg-main: #FBF8F1;
+            --bg-sidebar: #F4EFE6;
+            --bg-element: #EBE5D9; /* 输入框等背景 */
+            --border-color: #E6E0D0;
+            --text-primary: #2D2D2D;
+            --text-secondary: #57534E;
+            --text-tertiary: #A8A29E;
+            --accent-color: #000000;
+            --highlight-bg: #D1FAE5;
+            --highlight-text: #064E3B;
+            --font-body: 'Merriweather', serif; 
+            --font-ui: 'Inter', sans-serif;
+            --toggle-bg: #D6D3C9;
+            --toggle-active: #2D2D2D;
+        }
+
+        /* 冷色模式覆盖 */
+        [data-theme="cool"] {
+            --bg-main: #FFFFFF;
+            --bg-sidebar: #F9FAFB;
+            --bg-element: #F3F4F6;
+            --border-color: #E5E7EB;
+            --text-primary: #111827;
+            --text-secondary: #4B5563;
+            --text-tertiary: #9CA3AF;
+            --accent-color: #111827;
+            --highlight-bg: #E5E7EB;
+            --highlight-text: #111827;
+            --font-body: 'Inter', sans-serif; /* 冷色模式下切回无衬线体，更符合SaaS直觉，或者保留serif看个人喜好 */
+            --toggle-bg: #E5E7EB;
+            --toggle-active: #111827;
+        }
+
+        body {
+            background-color: var(--bg-main);
+            color: var(--text-primary);
+            font-family: var(--font-body);
+            transition: all 0.3s ease;
+        }
+
+        /* UI组件字体强制使用无衬线，保证清晰度 */
+        .ui-font { font-family: var(--font-ui); }
+        .mono-font { font-family: 'JetBrains Mono', monospace; }
+
+        .sidebar {
+            background-color: var(--bg-sidebar);
+            border-right: 1px solid var(--border-color);
+        }
+
+        /* 模拟荧光笔划重点 */
+        .highlight-mark {
+            background-color: var(--highlight-bg);
+            color: var(--highlight-text);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            font-family: var(--font-ui);
+            vertical-align: middle;
+            font-weight: 500;
+        }
+
+        /* 隐藏滚动条但保留功能 */
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        /* 自定义输入框聚焦效果 */
+        .custom-input:focus {
+            outline: none;
+            box-shadow: 0 1px 0 0 var(--text-primary);
+        }
+
+        /* 模拟纸张阴影 */
+        .paper-shadow {
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+        }
+        
+        /* 选中态 */
+        .nav-active {
+            background-color: rgba(0,0,0,0.05);
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+
+        /* 自定义 Toggle Switch */
+        .toggle-checkbox:checked {
+            right: 0;
+            border-color: var(--toggle-active);
+        }
+        .toggle-checkbox:checked + .toggle-label {
+            background-color: var(--toggle-active);
+        }
+        .toggle-checkbox:checked + .toggle-label:before {
+            transform: translateX(100%);
+        }
+        .toggle-label {
+            width: 36px;
+            height: 20px;
+            position: relative;
+            display: inline-block;
+            background-color: var(--toggle-bg);
+            border-radius: 9999px;
+            transition: all 0.3s;
+            cursor: pointer;
+        }
+        .toggle-label:before {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background-color: white;
+            transition: all 0.3s;
+        }
