@@ -109,15 +109,31 @@ const parseSourceLine = (raw: string): RenderedSource => {
       date: match[3].trim(),
     };
   }
+  const dateOnlyMatch = text.match(/^(.*?)\s+\((\d{4}-\d{2}-\d{2})\)\s*$/);
+  if (dateOnlyMatch) {
+    return {
+      raw: text,
+      title: dateOnlyMatch[1].trim(),
+      source: '',
+      date: dateOnlyMatch[2].trim(),
+    };
+  }
   return { raw: text, title: text, source: '', date: '' };
 };
+
+const normalizeTitleForMatch = (value: string): string =>
+  (value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 
 const parseBriefView = (content: string): ParsedBriefView => {
   const { body, sources } = splitBriefContent(content || '');
   const sourceItems = sources.map(parseSourceLine);
   const lines = (body || '').split('\n');
 
-  const entries: RenderedBriefEntry[] = [];
+    const entries: RenderedBriefEntry[] = [];
   let currentCluster = 'other';
   let current: RenderedBriefEntry | null = null;
   let mode: 'summary' | 'takeaways' = 'summary';
@@ -130,9 +146,17 @@ const parseBriefView = (content: string): ParsedBriefView => {
     current = null;
   };
 
-  for (const rawLine of lines) {
+    for (const rawLine of lines) {
     const line = rawLine.trim();
     if (!line || line === '---') continue;
+
+    const synthMatch = line.match(/^##\s+Synthesis$/i);
+    if (synthMatch) {
+      flush();
+      currentCluster = '__synthesis__';
+      mode = 'summary';
+      continue;
+    }
 
     const clusterMatch = line.match(/^##\s+\d+\.\s+(.+)$/i);
     if (clusterMatch) {
@@ -182,11 +206,15 @@ const parseBriefView = (content: string): ParsedBriefView => {
       continue;
     }
 
-    const relatedLine = line.match(/related articles:\s*(\d+)/i);
-    if (relatedLine) {
-      current.relatedArticles = Number(relatedLine[1]) || 0;
-      continue;
-    }
+      const relatedLine = line.match(/related articles:\s*(\d+)/i);
+      if (relatedLine) {
+        current.relatedArticles = Number(relatedLine[1]) || 0;
+        continue;
+      }
+
+      if (/^\*?evidence refs:\s*/i.test(line)) {
+        continue;
+      }
 
     if (mode === 'takeaways' && line.startsWith('- ')) {
       const item = line.slice(2).trim();
@@ -220,14 +248,16 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
   const [refreshStats, setRefreshStats] = useState<{ collected: number; saved: number; duplicates: number } | null>(null);
   const [notice, setNotice] = useState('');
   const [feedback, setFeedback] = useState<{ upvotes: number; downvotes: number } | null>(null);
+  const activeTopics = useMemo(() => topics.filter((topic) => topic.is_active), [topics]);
+  const activeTopicIdSet = useMemo(() => new Set(activeTopics.map((topic) => topic.id)), [activeTopics]);
 
   useEffect(() => {
-    if (!topics.length) return;
+    if (!activeTopics.length) return;
     if (activeTopic === 'all') return;
-    if (!topics.some((topic) => topic.id === activeTopic)) {
+    if (!activeTopicIdSet.has(activeTopic)) {
       setActiveTopic('all');
     }
-  }, [topics, activeTopic]);
+  }, [activeTopics, activeTopic, activeTopicIdSet]);
 
   const loadBriefHistory = async (topicId: number, preferredBriefId: number | null = null) => {
     try {
@@ -272,7 +302,7 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
     }
   };
 
-  const loadArticlesForBrief = async (topicId: number, date: string) => {
+  const loadArticlesForBrief = async (topicId: number, date: string, sourceHints: RenderedSource[] = []) => {
     setArticlesLoading(true);
     try {
       const res = await apiFetch(`/topics/${topicId}/articles?date=${encodeURIComponent(date)}&sort=time`);
@@ -281,7 +311,53 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
         return;
       }
       const data = (await res.json()) as { articles?: Article[] };
-      setTopicArticles(data.articles || []);
+      const dated = data.articles || [];
+      if (dated.length > 0) {
+        setTopicArticles(dated);
+        return;
+      }
+
+      // Brief may be generated from previous-day fallback sources. Try source dates before giving up.
+      const hintDates = Array.from(
+        new Set(
+          sourceHints
+            .map((src) => src.date)
+            .filter((d) => Boolean(d) && d !== date),
+        ),
+      ).slice(0, 3);
+      if (!hintDates.length) {
+        setTopicArticles([]);
+        return;
+      }
+
+      const byDate = await Promise.all(
+        hintDates.map(async (d) => {
+          const r = await apiFetch(`/topics/${topicId}/articles?date=${encodeURIComponent(d)}&sort=time`);
+          if (!r.ok) return [] as Article[];
+          const payload = (await r.json()) as { articles?: Article[] };
+          return payload.articles || [];
+        }),
+      );
+      const fallbackArticles = byDate.flat();
+      if (!fallbackArticles.length) {
+        setTopicArticles([]);
+        return;
+      }
+
+      const hintTitleSet = new Set(
+        sourceHints
+          .map((s) => normalizeTitleForMatch(s.title))
+          .filter(Boolean),
+      );
+      if (!hintTitleSet.size) {
+        setTopicArticles(fallbackArticles.slice(0, 40));
+        return;
+      }
+
+      const matched = fallbackArticles.filter((article) =>
+        hintTitleSet.has(normalizeTitleForMatch(article.title)),
+      );
+      setTopicArticles((matched.length > 0 ? matched : fallbackArticles).slice(0, 40));
     } catch {
       setTopicArticles([]);
     } finally {
@@ -324,7 +400,8 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
       setTopicArticles([]);
       return;
     }
-    loadArticlesForBrief(activeTopic, selectedBrief.date);
+    const parsedForFetch = parseBriefView(selectedBrief.content || '');
+    loadArticlesForBrief(activeTopic, selectedBrief.date, parsedForFetch.sources || []);
   }, [selectedBrief, activeTopic]);
 
   const loadFeedback = async (briefId: number) => {
@@ -397,10 +474,15 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
     }
   };
 
-  const activeTopicRecord = typeof activeTopic === 'number' ? topics.find((t) => t.id === activeTopic) || null : null;
+  const visibleAllTopicBriefs = useMemo(
+    () => allTopicBriefs.filter((brief) => activeTopicIdSet.has(brief.topic_id)),
+    [allTopicBriefs, activeTopicIdSet],
+  );
+  const activeTopicRecord = typeof activeTopic === 'number' ? activeTopics.find((t) => t.id === activeTopic) || null : null;
   const isRefreshing = refreshPhase !== 'idle' && refreshPhase !== 'done';
   const selectedView = selectedBrief ? parseBriefView(selectedBrief.content || '') : null;
-  const synthesisEntry = selectedView?.entries?.[0] || null;
+  const synthesisEntry = selectedView?.entries?.find(e => e.clusterLabel === '__synthesis__') || null;
+  const clusterEntries = selectedView?.entries?.filter(e => e.clusterLabel !== '__synthesis__') || [];
 
   const compactSourceName = (source: string): string => {
     const raw = (source || '').trim();
@@ -413,7 +495,7 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
     return cleaned || raw;
   };
 
-  const cleanArticleSnippet = (raw: string): string => {
+  const cleanArticleSnippet = (raw: string, title?: string): string => {
     let text = markdownToPlainText(raw || '');
     text = text
       .replace(/article\s+url\s*:/gi, ' ')
@@ -421,8 +503,29 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
       .replace(/points?\s*:\s*\d+/gi, ' ')
       .replace(/#\s*comments?\s*:\s*\d+/gi, ' ')
       .replace(/\[\s*publishedat\s*\]/gi, ' ')
+      .replace(/feed did not provide article body\.?/gi, ' ')
+      .replace(/source body is unavailable; summary uses headline-level evidence\.?/gi, ' ')
       .replace(/\s+/g, ' ')
       .trim();
+    // collapse obvious duplicated sentence pattern from low-signal feeds
+    const sentenceParts = text.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter(Boolean);
+    if (sentenceParts.length >= 2 && sentenceParts[0].toLowerCase() === sentenceParts[1].toLowerCase()) {
+      text = sentenceParts.slice(1).join(' ').trim();
+    }
+    const normalizedTitle = (title || '').trim().toLowerCase();
+    const normalize = (v: string) => v.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+    const normalizedText = normalize(text);
+    const normalizedTitleLoose = normalize(normalizedTitle);
+    if (
+      normalizedTitleLoose &&
+      (
+        normalizedText === normalizedTitleLoose ||
+        normalizedText.startsWith(`${normalizedTitleLoose} `) ||
+        normalizedTitleLoose.startsWith(normalizedText)
+      )
+    ) {
+      return '';
+    }
     return text;
   };
 
@@ -460,7 +563,7 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
           {activeTopic === 'all' && <span className="topic-chip-dot" />}
         </button>
 
-        {topics.map((topic) => {
+        {activeTopics.map((topic) => {
           const isActive = activeTopic === topic.id;
           return (
             <button key={topic.id} className={`topic-chip ${isActive ? 'active' : ''}`} onClick={() => setActiveTopic(topic.id)}>
@@ -477,7 +580,7 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
           {isRefreshing ? (refreshPhase === 'collecting' ? 'Collecting...' : 'Generating...') : 'Refresh Brief'}
         </button>
 
-        {topics.length === 0 && (
+        {activeTopics.length === 0 && (
           <div className="card" style={{ textAlign: 'center', padding: '2rem' }}>
             <h3>Start Your News Feed</h3>
             <p className="muted">Create topics to track news by keywords and RSS sources.</p>
@@ -495,14 +598,15 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
             </div>
           </div>
 
-          {allTopicBriefs.length === 0 && (
+          {visibleAllTopicBriefs.length === 0 && (
             <div className="muted">No topic briefs generated yet. Click Refresh Brief to generate one for each topic.</div>
           )}
 
           <div className="all-topics-stack">
-            {allTopicBriefs.map((brief) => {
-              const topic = topics.find((t) => t.id === brief.topic_id);
+            {visibleAllTopicBriefs.map((brief) => {
+              const topic = activeTopics.find((t) => t.id === brief.topic_id);
               const parsed = parseBriefView(brief.content || '');
+              const topicSynthesis = parsed.entries.find((e) => e.clusterLabel === '__synthesis__') || null;
               return (
                 <article key={brief.id} className="all-topic-section">
                   <div className="all-topic-head">
@@ -510,34 +614,32 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
                     <span className="source-meta">{formatBriefTimestamp(brief)}</span>
                   </div>
 
-                  {parsed.entries.length > 0 ? (
+                  {topicSynthesis ? (
                     <div className="brief-render-stack">
-                      {parsed.entries.slice(0, 2).map((entry, idx) => (
-                        <article key={`${brief.id}-entry-${idx}`} className="brief-article">
-                          <div className="brief-article-head ui-font">
-                            <div className="brief-article-meta">
-                              <span className="brief-chip">{entry.topicTag || entry.clusterLabel}</span>
-                              <span className="brief-meta-sep">|</span>
-                              <span>{formatBriefTimestamp(brief)}</span>
-                            </div>
-                            <span className="brief-article-count">{entry.relatedArticles || brief.item_count} articles</span>
+                      <article className="brief-article">
+                        <div className="brief-article-head ui-font">
+                          <div className="brief-article-meta">
+                            <span className="brief-chip">{topicSynthesis.topicTag || 'Daily Executive Summary'}</span>
+                            <span className="brief-meta-sep">|</span>
+                            <span>{formatBriefTimestamp(brief)}</span>
                           </div>
-                          <h5 className="brief-headline">{entry.headline || entry.clusterLabel}</h5>
-                          <p className="brief-summary">{entry.summary}</p>
-                          <div className="brief-takeaways">
-                            <div className="brief-takeaways-title ui-font">Key Takeaways</div>
-                            <ul>
-                              {entry.takeaways.slice(0, 2).map((takeaway, tIdx) => (
-                                <li key={`${brief.id}-tk-${tIdx}`}>{takeaway}</li>
-                              ))}
-                            </ul>
-                          </div>
-                          <div className="brief-metadata ui-font">
-                            <span className="badge">Sentiment: {entry.sentiment}</span>
-                            <span className="badge">Reliability: {entry.reliability}</span>
-                          </div>
-                        </article>
-                      ))}
+                          <span className="brief-article-count">{topicSynthesis.relatedArticles || brief.item_count} articles</span>
+                        </div>
+                        <h5 className="brief-headline">{topicSynthesis.headline || 'Daily Executive Summary'}</h5>
+                        <p className="brief-summary">{topicSynthesis.summary}</p>
+                        <div className="brief-takeaways">
+                          <div className="brief-takeaways-title ui-font">Key Takeaways</div>
+                          <ul>
+                            {topicSynthesis.takeaways.slice(0, 8).map((takeaway, tIdx) => (
+                              <li key={`${brief.id}-tk-${tIdx}`}>{takeaway}</li>
+                            ))}
+                          </ul>
+                        </div>
+                        <div className="brief-metadata ui-font">
+                          <span className="badge">Sentiment: {topicSynthesis.sentiment}</span>
+                          <span className="badge">Reliability: {topicSynthesis.reliability}</span>
+                        </div>
+                      </article>
                     </div>
                   ) : (
                     <pre className="brief-content">{parsed.fallbackText}</pre>
@@ -652,7 +754,7 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
                           <div className="brief-takeaways">
                             <div className="brief-takeaways-title ui-font">Key Takeaways</div>
                             <ul>
-                              {synthesisEntry.takeaways.slice(0, 2).map((takeaway, tIdx) => (
+                              {synthesisEntry.takeaways.slice(0, 12).map((takeaway, tIdx) => (
                                 <li key={`${selectedBrief.id}-synthesis-${tIdx}`}>{takeaway}</li>
                               ))}
                             </ul>
@@ -717,7 +819,7 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
                   {!articlesLoading && topicArticles.length > 0 && (
                     <div className="articles-grid">
                       {topicArticles.map((article) => {
-                        const snippet = cleanArticleSnippet(article.content);
+                        const snippet = cleanArticleSnippet(article.content, article.title);
                         return (
                           <article key={article.id} className="article-card news-article">
                             <div className="article-source">{compactSourceName(article.source)}</div>

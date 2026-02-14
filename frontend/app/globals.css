@@ -1505,7 +1505,7 @@ code,
 
 /* Settings */
 .settings-panel {
-  max-width: 900px;
+  max-width: 1120px;
 }
 
 .settings-section {
@@ -1526,6 +1526,17 @@ code,
 
 .settings-grid-scope {
   gap: 30px;
+  grid-template-columns: 1fr;
+  align-items: start;
+}
+
+.settings-scope-focus {
+  min-height: 0;
+}
+
+.settings-scope-intake {
+  max-height: none;
+  overflow: visible;
 }
 
 .settings-panel .card {
@@ -1647,8 +1658,8 @@ code,
 }
 
 .settings-topic-list {
-  max-height: 420px;
-  overflow-y: auto;
+  max-height: none;
+  overflow: visible;
 }
 
 .topic-card {
@@ -1660,6 +1671,11 @@ code,
   display: flex;
   justify-content: space-between;
   gap: 10px;
+}
+
+.topic-card-inactive {
+  opacity: 0.75;
+  background: color-mix(in srgb, var(--bg-main) 84%, var(--bg-sidebar));
 }
 
 .topic-name {
@@ -1713,6 +1729,32 @@ code,
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+.settings-badge.status-on {
+  color: #18624f;
+  border-color: color-mix(in srgb, #18624f 45%, var(--border-color));
+}
+
+.settings-badge.status-off {
+  color: #8b5e00;
+  border-color: color-mix(in srgb, #8b5e00 45%, var(--border-color));
+}
+
+.settings-inline-check {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px !important;
+  text-transform: none !important;
+  letter-spacing: normal !important;
+  color: var(--text-secondary) !important;
+}
+
+.settings-inline-check input[type='checkbox'] {
+  width: 14px;
+  height: 14px;
+  accent-color: #2e7d68;
 }
 
 .delete-btn {
@@ -1910,6 +1952,23 @@ code,
   word-break: break-word;
 }
 
+@media (max-width: 1200px) {
+  .settings-grid-scope {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+
+  .settings-scope-focus,
+  .settings-scope-intake {
+    min-height: 0;
+    max-height: none;
+  }
+
+  .settings-topic-list {
+    max-height: none;
+  }
+}
+
 @media (max-width: 1100px) {
   .content-scroll {
     padding: 24px 30px 72px;
@@ -1993,4 +2052,141 @@ code,
   .history-filters input {
     width: 100%;
   }
+}
+
+/* ── List Editor (keyword groups & RSS sources) ──────────── */
+
+.list-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.list-editor-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.list-editor-row input {
+  flex: 1;
+  font-size: 12px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  background: var(--bg-main);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+}
+
+.list-editor-remove {
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.list-editor-remove:hover {
+  background: #ef44441a;
+  color: #ef4444;
+  border-color: #ef4444;
+}
+
+.list-editor-add {
+  align-self: flex-start;
+  border: 1px dashed var(--border-color);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 4px 10px;
+  margin-top: 2px;
+}
+
+.list-editor-add:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ── Keyword tags (view mode) ────────────────────────────── */
+
+.keyword-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.keyword-tag {
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 3px;
+  background: var(--bg-element);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+/* ── Source URL list (expandable in view mode) ───────────── */
+
+.source-count-toggle {
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+}
+
+.source-count-toggle:hover {
+  color: var(--accent);
+}
+
+.source-url-list {
+  margin-top: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  background: var(--bg-element);
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.source-url-item {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 2px 0;
+  word-break: break-all;
+}
+
+.source-url-item + .source-url-item {
+  border-top: 1px solid var(--border-color);
+}
+
+/* ── Label hint text ─────────────────────────────────────── */
+
+.label-hint {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 400;
+  margin-top: 1px;
+  margin-bottom: 4px;
+}
+
+/* ── Topic edit form spacing ─────────────────────────────── */
+
+.topic-edit-form label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 0;
 }

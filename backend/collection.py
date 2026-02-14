@@ -46,18 +46,31 @@ class Collector:
         feed = feedparser.parse(url)
         source = (feed.feed.get("title") if hasattr(feed, "feed") else None) or _extract_domain(url)
         items: List[CollectedItem] = []
+        feed_domain = _extract_domain(url)
         for entry in feed.entries:
             published_at = self._parse_date(entry)
-            content = entry.get("summary", "") or entry.get("description", "") or ""
+            raw_entry_content = self._extract_entry_content(entry)
+            content = raw_entry_content
+            link = entry.get("link", "")
+            # HN RSS often provides only metadata in summary and article URL separately.
+            if "hnrss.org" in feed_domain or "news.ycombinator.com" in feed_domain:
+                article_url = _extract_hn_article_url(raw_entry_content)
+                if article_url:
+                    link = article_url
             cleaned = self._clean_text(content)
+            title_clean = self._clean_text(entry.get("title", ""))
             if _looks_like_feed_metadata_noise(cleaned):
-                title = self._clean_text(entry.get("title", ""))
-                if title:
-                    cleaned = f"{title}. Feed did not provide article body."
+                if title_clean:
+                    # Keep body empty when feed only exposes metadata fields.
+                    # Downstream UI can show "No excerpt available" without noise text.
+                    cleaned = ""
+            elif _looks_like_title_echo(cleaned, title_clean):
+                # If feed body is basically a title echo, keep excerpt empty.
+                cleaned = ""
             items.append(
                 CollectedItem(
                     title=entry.get("title", ""),
-                    url=entry.get("link", ""),
+                    url=link,
                     content=cleaned,
                     source=source,
                     source_type="rss",
@@ -65,6 +78,34 @@ class Collector:
                 )
             )
         return items
+
+    def _extract_entry_content(self, entry) -> str:
+        """Best-effort content extraction from common RSS/Atom fields."""
+        # 1) content:encoded / content list (often full body)
+        content_field = entry.get("content")
+        if isinstance(content_field, list):
+            for part in content_field:
+                if not isinstance(part, dict):
+                    continue
+                value = part.get("value") or part.get("content") or ""
+                if isinstance(value, str) and value.strip():
+                    return value
+        elif isinstance(content_field, dict):
+            value = content_field.get("value") or content_field.get("content") or ""
+            if isinstance(value, str) and value.strip():
+                return value
+        elif isinstance(content_field, str) and content_field.strip():
+            return content_field
+
+        # 2) summary/detail fields
+        summary_detail = entry.get("summary_detail")
+        if isinstance(summary_detail, dict):
+            value = summary_detail.get("value") or ""
+            if isinstance(value, str) and value.strip():
+                return value
+
+        # 3) legacy description/summary
+        return entry.get("summary", "") or entry.get("description", "") or ""
 
     def fetch_tavily(self, query: str, max_results: int = 5) -> List[CollectedItem]:
         if not self.tavily_enabled or not self.tavily_client:
@@ -92,6 +133,46 @@ class Collector:
                 )
             )
         return results
+
+    def enrich_item_with_tavily(self, item: CollectedItem) -> CollectedItem:
+        """Best-effort enrichment for low-signal RSS entries using Tavily."""
+        if not self.tavily_enabled or not self.tavily_client:
+            return item
+        query = item.url or item.title
+        if not query:
+            return item
+        try:
+            resp = self.tavily_client.search(
+                query=query,
+                max_results=2,
+                search_depth="advanced",
+                include_answer=False,
+                include_images=False,
+            )
+            results = resp.get("results", []) or []
+            if not results:
+                return item
+            chosen = None
+            item_url = (item.url or "").strip().lower()
+            for row in results:
+                row_url = str(row.get("url") or "").strip().lower()
+                if item_url and row_url == item_url:
+                    chosen = row
+                    break
+            if chosen is None:
+                chosen = results[0]
+            candidate = self._clean_text(chosen.get("content", "") or "")
+            if not candidate:
+                return item
+            # Replace only when better than existing content.
+            if len(candidate.strip()) > len((item.content or "").strip()):
+                item.content = candidate
+            chosen_url = str(chosen.get("url") or "").strip()
+            if chosen_url:
+                item.url = chosen_url
+            return item
+        except Exception:
+            return item
 
     def _is_recent(self, published_at: Optional[str], max_age_hours: int, allow_undated: bool) -> bool:
         if not published_at:
@@ -164,6 +245,44 @@ def _looks_like_feed_metadata_noise(text: str) -> bool:
     words = lowered.split()
     if words and sum(1 for w in words if "url" in w or "comment" in w) >= 2:
         return True
+    return False
+
+
+def _extract_hn_article_url(text: str) -> str:
+    raw = (text or "").strip()
+    if not raw:
+        return ""
+    m = re.search(r"article\s+url\s*:\s*(https?://\S+)", raw, flags=re.IGNORECASE)
+    if not m:
+        return ""
+    url = m.group(1).strip().rstrip(".,)")
+    return url
+
+
+def _normalize_compare_text(text: str) -> str:
+    lowered = (text or "").lower()
+    lowered = re.sub(r"[^a-z0-9\s]", " ", lowered)
+    lowered = re.sub(r"\s+", " ", lowered).strip()
+    return lowered
+
+
+def _looks_like_title_echo(content: str, title: str) -> bool:
+    c = _normalize_compare_text(content)
+    t = _normalize_compare_text(title)
+    if not c or not t:
+        return False
+    if c == t:
+        return True
+    if c.startswith(t):
+        tail = c[len(t):].strip()
+        # title + very short filler = still title echo
+        if len(tail) < 24:
+            return True
+    # repeated headline pattern
+    if c.count(t) >= 2:
+        remainder = c.replace(t, " ").strip()
+        if len(remainder) < 36:
+            return True
     return False
 
 
@@ -361,6 +480,8 @@ def collect_for_topic(topic, collector: Collector, max_tavily_results: int = 5) 
     keyword_min_score = int(os.getenv("ARCBRIEF_KEYWORD_MIN_SCORE", "1"))
     arxiv_min_score = int(os.getenv("ARCBRIEF_ARXIV_MIN_SCORE", "2"))
     arxiv_max_items = int(os.getenv("ARCBRIEF_ARXIV_MAX_ITEMS", "3"))
+    enable_tavily_enrich = os.getenv("ARCBRIEF_TAVILY_ENRICH_EMPTY", "1") == "1"
+    tavily_enrich_max_items = int(os.getenv("ARCBRIEF_TAVILY_ENRICH_MAX_ITEMS", "12"))
 
     rss_items: List[CollectedItem] = []
     rss_health_stats: List[Dict[str, Any]] = []
@@ -391,6 +512,23 @@ def collect_for_topic(topic, collector: Collector, max_tavily_results: int = 5) 
     ]
     rss_items = _dedupe_by_url(rss_items)
     rss_items = _dedupe_by_title(rss_items)
+    if enable_tavily_enrich and tavily_enabled:
+        enriched = 0
+        for item in rss_items:
+            if enriched >= max(0, tavily_enrich_max_items):
+                break
+            low_signal = (
+                not (item.content or "").strip()
+                or _looks_like_title_echo(item.content, item.title)
+                or len((item.content or "").strip()) < min_content_len
+            )
+            if not low_signal:
+                continue
+            before_len = len((item.content or "").strip())
+            collector.enrich_item_with_tavily(item)
+            after_len = len((item.content or "").strip())
+            if after_len > before_len:
+                enriched += 1
     rss_items = [
         item for item in rss_items
         if _passes_quality_gate(item, min_title_len, min_content_len, min_path_depth)

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 import json
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 from foreign_query_agent.config import Settings
@@ -133,6 +133,8 @@ _NOISY_SUMMARY_PATTERNS = [
     r"points?\s*:\s*\d+",
     r"#\s*comments?\s*:\s*\d+",
     r"\[\s*publishedat\s*\]",
+    r"feed\s+did\s+not\s+provide\s+article\s+body\.?",
+    r"source\s+body\s+is\s+unavailable;?\s*summary\s+uses\s+headline[-\s]level\s+evidence\.?",
 ]
 
 _SOURCE_TIER_DOMAINS: Dict[str, str] = {
@@ -143,6 +145,7 @@ _SOURCE_TIER_DOMAINS: Dict[str, str] = {
     "research.google": "official",
     "blog.research.google": "official",
     "blog.google": "official",
+    "deepmind.google": "official",
     "huggingface.co": "official",
     # high-signal media
     "technologyreview.com": "high",
@@ -151,10 +154,23 @@ _SOURCE_TIER_DOMAINS: Dict[str, str] = {
     "arstechnica.com": "high",
     "theverge.com": "high",
     "venturebeat.com": "high",
+    "foreignaffairs.com": "high",
+    "wsj.com": "high",
+    "feeds.a.dj.com": "high",
+    "cnbc.com": "high",
+    "npr.org": "high",
+    "theguardian.com": "high",
+    "bbc.co.uk": "high",
+    "aljazeera.com": "high",
+    "federalreserve.gov": "high",
+    "marketwatch.com": "high",
     # medium aggregators
     "hnrss.org": "medium",
     "news.ycombinator.com": "medium",
     "marktechpost.com": "medium",
+    "scmp.com": "medium",
+    "mining.com": "medium",
+    "news.google.com": "medium",
     # low-noise scientific feed (valuable but noisy for daily brief)
     "arxiv.org": "low",
 }
@@ -198,7 +214,8 @@ def _pick_best_item_text(item: Dict[str, Any], label: str) -> str:
     if content and not _looks_like_low_signal_text(content):
         return content
     if title:
-        return f"{title}. Source body is unavailable; summary uses headline-level evidence."
+        # Fall back to title only; avoid injecting noisy boilerplate into summaries/cards.
+        return title
     return "No high-signal content was available from the collected feed."
 
 
@@ -265,6 +282,44 @@ def _normalize_structured_brief(item: Dict[str, Any], fallback_tag: str) -> Dict
         "key_takeaways": normalized_takeaways,
         "sentiment": sentiment,
         "reliability_score": reliability,
+    }
+
+
+def _normalize_synthesis_brief(item: Dict[str, Any], fallback_tag: str) -> Dict[str, Any]:
+    topic_tag = (item.get("topic_tag") or fallback_tag).strip()
+    headline = _truncate_words(item.get("headline") or "Daily executive summary", 15)
+    summary = _truncate_words(item.get("summary") or "No synthesis provided.", 260)
+
+    takeaways = item.get("key_takeaways") if isinstance(item.get("key_takeaways"), list) else []
+    normalized_takeaways = [_truncate_words(str(t), 28) for t in takeaways if str(t).strip()]
+    while len(normalized_takeaways) < 5:
+        normalized_takeaways.append("Additional signal pending validation.")
+    normalized_takeaways = normalized_takeaways[:12]
+
+    sentiment = str(item.get("sentiment") or "neutral").strip().lower()
+    if sentiment not in {"positive", "neutral", "negative"}:
+        sentiment = "neutral"
+
+    reliability = str(item.get("reliability_score") or "med").strip().lower()
+    if reliability not in {"high", "med", "low"}:
+        reliability = "med"
+
+    evidence_refs_raw = item.get("evidence_refs") if isinstance(item.get("evidence_refs"), list) else []
+    evidence_refs: List[str] = []
+    for ref in evidence_refs_raw:
+        token = str(ref).strip()
+        if token and token not in evidence_refs:
+            evidence_refs.append(token)
+    evidence_refs = evidence_refs[:12]
+
+    return {
+        "topic_tag": topic_tag,
+        "headline": headline,
+        "summary": summary,
+        "key_takeaways": normalized_takeaways,
+        "sentiment": sentiment,
+        "reliability_score": reliability,
+        "evidence_refs": evidence_refs,
     }
 
 
@@ -417,6 +472,231 @@ def _summarize_cluster_with_llm(
         if isinstance(item, dict)
     ]
     return normalized or _structured_fallback(label, items)
+
+
+def _fallback_synthesis_from_clusters(cluster_briefs: List[Dict[str, Any]]) -> Dict[str, Any]:
+    if not cluster_briefs:
+        return {
+            "topic_tag": "Daily Executive Summary",
+            "headline": "No synthesis available",
+            "summary": "No high-signal synthesis could be generated.",
+            "key_takeaways": ["No data available.", "No data available."],
+            "sentiment": "neutral",
+            "reliability_score": "low",
+        }
+
+    first = cluster_briefs[0]
+    second = cluster_briefs[1] if len(cluster_briefs) > 1 else None
+    if second:
+        headline = _truncate_words(
+            f"{first.get('headline', 'Primary signal')} and {second.get('headline', 'secondary signal')}",
+            15,
+        )
+        summary = (
+            f"{first.get('summary', '')} Secondary signal: {second.get('summary', '')}"
+        ).strip()
+        takeaways = [
+            (first.get("key_takeaways") or ["No additional verified signal."])[0],
+            (second.get("key_takeaways") or ["No additional verified signal."])[0],
+        ]
+    else:
+        headline = first.get("headline", "Today's Brief")
+        summary = first.get("summary", "")
+        takeaways = first.get("key_takeaways", ["No additional signal.", "No additional signal."])
+
+    return _normalize_synthesis_brief(
+        {
+            "topic_tag": "Daily Executive Summary",
+            "headline": headline,
+            "summary": summary,
+            "key_takeaways": takeaways,
+            "sentiment": "neutral",
+            "reliability_score": first.get("reliability_score", "med"),
+            "evidence_refs": [],
+        },
+        fallback_tag="Daily Executive Summary",
+    )
+
+
+def _fallback_synthesis_from_evidence(
+    cluster_evidence: List[Dict[str, Any]],
+    cluster_briefs: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    snippets: List[Dict[str, str]] = []
+    for cluster in cluster_evidence:
+        for item in cluster.get("snippets", []):
+            if isinstance(item, dict):
+                snippets.append(item)
+
+    if not snippets:
+        return _fallback_synthesis_from_clusters(cluster_briefs or [])
+
+    top = snippets[: min(8, len(snippets))]
+    head = top[0]
+    headline = _truncate_words(head.get("title", "Daily executive summary"), 15)
+    summary = _truncate_words(" ".join(s.get("snippet", "") for s in top), 180)
+    takeaways = [_truncate_words(s.get("title", "Primary signal"), 28) for s in top[:8]]
+    source = head.get("source", "")
+    reliability = _reliability_from_domain(source)
+    return _normalize_synthesis_brief(
+        {
+            "topic_tag": "Daily Executive Summary",
+            "headline": headline,
+            "summary": summary,
+            "key_takeaways": takeaways,
+            "sentiment": "neutral",
+            "reliability_score": reliability,
+            "evidence_refs": [s.get("ref", "") for s in top[:12]],
+        },
+        fallback_tag="Daily Executive Summary",
+    )
+
+
+def _build_synthesis_evidence(
+    sorted_clusters: List[Tuple[str, List[Dict[str, Any]]]],
+    source_weights: Optional[Dict[str, float]] = None,
+    per_cluster: Optional[int] = None,
+    max_total: int = 36,
+) -> List[Dict[str, Any]]:
+    payload: List[Dict[str, Any]] = []
+    added = 0
+    for c_idx, (label, items) in enumerate(sorted_clusters, start=1):
+        if added >= max_total:
+            break
+        cluster_id = f"C{c_idx}"
+        items_sorted = sorted(items, key=lambda x: _item_sort_key(x, source_weights), reverse=True)
+        limit = len(items_sorted) if per_cluster is None else max(1, per_cluster)
+        snippets: List[Dict[str, str]] = []
+        for e_idx, item in enumerate(items_sorted[:limit], start=1):
+            if added >= max_total:
+                break
+            source = _extract_domain(item.get("url") or item.get("source") or "unknown")
+            ts = item.get("published_at") or item.get("created_at") or "unknown"
+            snippets.append(
+                {
+                    "ref": f"{cluster_id}-E{e_idx}",
+                    "title": _truncate_words(_clean_signal_text(item.get("title") or "Untitled"), 18),
+                    "source": source,
+                    "time": ts,
+                    "snippet": _truncate_words(_pick_best_item_text(item, label), 48),
+                    "url": item.get("url", ""),
+                }
+            )
+            added += 1
+        payload.append({"cluster_id": cluster_id, "label": label, "snippets": snippets})
+    return payload
+
+
+def _generate_synthesis(
+    llm: LLMClient | MockLLM,
+    cluster_briefs: List[Dict[str, Any]],
+    cluster_evidence: List[Dict[str, Any]],
+    total_articles: int,
+    language: str = "English (US)",
+    app_config: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Generate one global executive synthesis directly from article-level evidence."""
+    if not cluster_evidence:
+        return {
+            "topic_tag": "Daily Executive Summary",
+            "headline": "No evidence available for synthesis",
+            "summary": "Insufficient evidence to generate a global synthesis.",
+            "key_takeaways": ["No data available.", "No data available."],
+            "sentiment": "neutral",
+            "reliability_score": "low",
+        }
+
+    dynamic_instruction = _build_dynamic_instruction(app_config, language)
+
+    evidence_lines: List[str] = []
+    valid_refs: set[str] = set()
+    evidence_count = 0
+    for cluster in cluster_evidence:
+        cluster_id = cluster.get("cluster_id", "")
+        label = cluster.get("label", "")
+        snippets = cluster.get("snippets", [])
+        if cluster_id and label:
+            evidence_lines.append(f"{cluster_id} [{label}]")
+        for snippet in snippets:
+            ref = str(snippet.get("ref", "")).strip()
+            title = str(snippet.get("title", "")).strip()
+            source = str(snippet.get("source", "")).strip()
+            ts = str(snippet.get("time", "")).strip()
+            body = str(snippet.get("snippet", "")).strip()
+            if not ref:
+                continue
+            valid_refs.add(ref)
+            evidence_count += 1
+            evidence_lines.append(
+                f"- {ref} | {title} | source={source} | time={ts} | body={body}"
+            )
+
+    system_prompt = (
+        "You are an intelligence analyst producing a daily executive synthesis.\n"
+        "Given article-level evidence snippets, produce ONE global synthesis that:\n"
+        "1. Identifies the most significant theme across all clusters\n"
+        "2. Connects related developments across different clusters\n"
+        "3. Highlights what decision-makers should focus on today\n\n"
+        f"[DYNAMIC INSTRUCTION]\n{dynamic_instruction}\n\n"
+        "[RULES]\n"
+        "1. Output ONLY valid JSON. No markdown, no conversational text.\n"
+        "2. The summary must be 10-16 sentences (roughly 300-600 words) and grounded in evidence snippets.\n"
+        "3. The headline must capture the day's single most important theme (max 15 words).\n"
+        "4. key_takeaways must contain 6-10 concise bullets, each traceable to evidence.\n"
+        "5. evidence_refs must include references from at least two different clusters when available.\n"
+        "6. evidence_refs should cite at least 6 snippets when total evidence >= 12.\n"
+        "7. Do NOT introduce claims or entities that do not appear in [EVIDENCE SNIPPETS].\n\n"
+        "[EXPECTED JSON SCHEMA]\n"
+        "{\n"
+        "  \"headline\": \"[Max 15 words]\",\n"
+        "  \"summary\": \"[10-16 sentences connecting cross-cluster patterns]\",\n"
+        "  \"key_takeaways\": [\"[Takeaway 1]\", \"[Takeaway 2]\", \"...\"] ,\n"
+        "  \"evidence_refs\": [\"[e.g., C1-E1]\", \"[e.g., C2-E1]\"],\n"
+        "  \"sentiment\": \"[positive/neutral/negative]\",\n"
+        "  \"reliability_score\": \"[high/med/low]\"\n"
+        "}"
+    )
+    user_prompt = (
+        f"Today's brief covers {total_articles} articles. Evidence snippets provided: {evidence_count}.\n\n"
+        "[EVIDENCE SNIPPETS]\n"
+        + "\n".join(evidence_lines)
+    )
+
+    try:
+        raw = llm.invoke(system_prompt, user_prompt)
+        parsed_text = _extract_json_text(raw)
+        data = json.loads(parsed_text)
+        if not isinstance(data, dict):
+            raise ValueError("Not a dict")
+    except Exception:
+        return _fallback_synthesis_from_evidence(cluster_evidence, cluster_briefs)
+
+    refs = data.get("evidence_refs") if isinstance(data.get("evidence_refs"), list) else []
+    covered_clusters = {
+        ref.split("-")[0]
+        for ref in refs
+        if isinstance(ref, str) and ref in valid_refs and "-" in ref
+    }
+    valid_ref_count = sum(1 for ref in refs if isinstance(ref, str) and ref in valid_refs)
+    min_required_clusters = min(2, len(cluster_evidence))
+    min_required_refs = 6 if evidence_count >= 12 else (3 if evidence_count >= 6 else 1)
+    if min_required_clusters > 0 and len(covered_clusters) < min_required_clusters:
+        return _fallback_synthesis_from_evidence(cluster_evidence, cluster_briefs)
+    if valid_ref_count < min_required_refs:
+        return _fallback_synthesis_from_evidence(cluster_evidence, cluster_briefs)
+
+    return _normalize_synthesis_brief(
+        {
+            "topic_tag": "Daily Executive Summary",
+            "headline": data.get("headline", "Today's Brief"),
+            "summary": data.get("summary", ""),
+            "key_takeaways": data.get("key_takeaways", []),
+            "sentiment": data.get("sentiment", "neutral"),
+            "reliability_score": data.get("reliability_score", "med"),
+            "evidence_refs": refs,
+        },
+        fallback_tag="Daily Executive Summary",
+    )
 
 
 def _build_explainability(label: str, items: List[Dict[str, Any]]) -> List[str]:
@@ -577,12 +857,22 @@ def generate_brief_markdown(
         key=lambda kv: _cluster_sort_key(kv[1], source_weights),
         reverse=True,
     )
+    max_synthesis_evidence = max(24, min(total_items, 60))
+    synthesis_evidence = _build_synthesis_evidence(
+        sorted_clusters,
+        source_weights,
+        per_cluster=None,
+        max_total=max_synthesis_evidence,
+    )
 
+    all_cluster_briefs: List[Dict[str, Any]] = []
+
+    cluster_lines_buf: List[str] = []
     for idx, (label, items) in enumerate(sorted_clusters, start=1):
         items_sorted = sorted(items, key=lambda x: _item_sort_key(x, source_weights), reverse=True)
 
-        lines.append(f"## {idx}. {label}")
-        lines.append("")
+        cluster_lines_buf.append(f"## {idx}. {label}")
+        cluster_lines_buf.append("")
         if llm:
             try:
                 briefs = _summarize_cluster_with_llm(
@@ -598,24 +888,68 @@ def generate_brief_markdown(
             briefs = _structured_fallback(label, items_sorted)
 
         for brief in briefs[:2]:
-            lines.append(f"### {brief['topic_tag']}")
-            lines.append(f"**{brief['headline']}**")
-            lines.append("")
-            lines.append(brief["summary"])
-            lines.append("")
-            lines.append("**Key Takeaways**")
+            all_cluster_briefs.append(brief)
+            cluster_lines_buf.append(f"### {brief['topic_tag']}")
+            cluster_lines_buf.append(f"**{brief['headline']}**")
+            cluster_lines_buf.append("")
+            cluster_lines_buf.append(brief["summary"])
+            cluster_lines_buf.append("")
+            cluster_lines_buf.append("**Key Takeaways**")
             for takeaway in brief["key_takeaways"][:2]:
-                lines.append(f"- {takeaway}")
-            lines.append("")
-            lines.append(
+                cluster_lines_buf.append(f"- {takeaway}")
+            cluster_lines_buf.append("")
+            cluster_lines_buf.append(
                 f"*Sentiment: {brief['sentiment']} | Reliability: {brief['reliability_score']}*"
             )
-            lines.append("")
+            cluster_lines_buf.append("")
 
-        lines.append(f"*(Related articles: {len(items_sorted)})*")
+        cluster_lines_buf.append(f"*(Related articles: {len(items_sorted)})*")
+        cluster_lines_buf.append("")
+        cluster_lines_buf.append("---")
+        cluster_lines_buf.append("")
+
+    # Generate cross-cluster synthesis and insert before cluster details
+    if llm and all_cluster_briefs:
+        try:
+            synthesis = _generate_synthesis(
+                llm,
+                all_cluster_briefs,
+                synthesis_evidence,
+                total_articles=total_items,
+                language=language,
+                app_config=app_config,
+            )
+        except Exception:
+            synthesis = _fallback_synthesis_from_clusters(all_cluster_briefs)
+    elif all_cluster_briefs:
+        synthesis = _fallback_synthesis_from_clusters(all_cluster_briefs)
+    else:
+        synthesis = None
+
+    if synthesis:
+        lines.append("## Synthesis")
+        lines.append("")
+        lines.append(f"### {synthesis.get('topic_tag', 'Daily Executive Summary')}")
+        lines.append(f"**{synthesis.get('headline', 'Todays Brief')}**")
+        lines.append("")
+        lines.append(synthesis.get("summary", ""))
+        lines.append("")
+        lines.append("**Key Takeaways**")
+        for tk in (synthesis.get("key_takeaways") or [])[:12]:
+            lines.append(f"- {tk}")
+        refs = synthesis.get("evidence_refs") or []
+        if refs:
+            lines.append("")
+            lines.append(f"*Evidence refs: {', '.join(refs[:12])}*")
+        lines.append("")
+        lines.append(
+            f"*Sentiment: {synthesis.get('sentiment', 'neutral')} | Reliability: {synthesis.get('reliability_score', 'med')}*"
+        )
         lines.append("")
         lines.append("---")
         lines.append("")
+
+    lines.extend(cluster_lines_buf)
 
     lines.append("## Sources")
     lines.append("")
@@ -670,5 +1004,3 @@ def build_brief_for_topic(
         language=language,
         app_config=cfg,
     )
-
-

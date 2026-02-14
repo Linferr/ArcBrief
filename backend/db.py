@@ -377,8 +377,29 @@ class ArcBriefDB:
                 try:
                     cur = conn.execute(
                         """
-                        INSERT OR IGNORE INTO articles (topic_id, title, url, content, source, published_at)
+                        INSERT INTO articles (topic_id, title, url, content, source, published_at)
                         VALUES (?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(url) DO UPDATE SET
+                          title = CASE
+                            WHEN TRIM(COALESCE(articles.title, '')) = '' AND TRIM(COALESCE(excluded.title, '')) != ''
+                            THEN excluded.title ELSE articles.title
+                          END,
+                          content = CASE
+                            WHEN LENGTH(TRIM(COALESCE(excluded.content, ''))) > LENGTH(TRIM(COALESCE(articles.content, '')))
+                            THEN excluded.content ELSE articles.content
+                          END,
+                          source = CASE
+                            WHEN TRIM(COALESCE(articles.source, '')) = '' AND TRIM(COALESCE(excluded.source, '')) != ''
+                            THEN excluded.source ELSE articles.source
+                          END,
+                          published_at = CASE
+                            WHEN articles.published_at IS NULL AND excluded.published_at IS NOT NULL
+                            THEN excluded.published_at ELSE articles.published_at
+                          END
+                        WHERE
+                          (TRIM(COALESCE(articles.title, '')) = '' AND TRIM(COALESCE(excluded.title, '')) != '')
+                          OR (LENGTH(TRIM(COALESCE(excluded.content, ''))) > LENGTH(TRIM(COALESCE(articles.content, ''))))
+                          OR (articles.published_at IS NULL AND excluded.published_at IS NOT NULL)
                         """,
                         (
                             topic_id,

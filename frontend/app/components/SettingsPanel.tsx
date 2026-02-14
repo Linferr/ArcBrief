@@ -17,22 +17,82 @@ type RunStat = {
   started_at: string;
 };
 
+/* ── Reusable list-of-inputs editor ─────────────────────────── */
+
+function ListEditor({
+  items,
+  onChange,
+  placeholder,
+  inputType = 'text',
+  addLabel,
+}: {
+  items: string[];
+  onChange: (next: string[]) => void;
+  placeholder: string;
+  inputType?: string;
+  addLabel: string;
+}) {
+  const update = (idx: number, value: string) => {
+    const next = items.map((v, i) => (i === idx ? value : v));
+    onChange(next);
+  };
+  const remove = (idx: number) => {
+    onChange(items.filter((_, i) => i !== idx));
+  };
+  const add = () => onChange([...items, '']);
+
+  return (
+    <div className="list-editor">
+      {items.map((item, idx) => (
+        <div key={idx} className="list-editor-row">
+          <input
+            type={inputType}
+            value={item}
+            onChange={(e) => update(idx, e.target.value)}
+            placeholder={placeholder}
+          />
+          <button
+            type="button"
+            className="list-editor-remove"
+            onClick={() => remove(idx)}
+            title="Remove"
+          >
+            &times;
+          </button>
+        </div>
+      ))}
+      <button type="button" className="list-editor-add" onClick={add}>
+        + {addLabel}
+      </button>
+    </div>
+  );
+}
+
+/* ── Main component ─────────────────────────────────────────── */
+
 export default function SettingsPanel({ topics, onTopicsChange }: Props) {
   const showDeveloperPanels = process.env.NEXT_PUBLIC_SHOW_DEV_PANELS === '1';
+
+  // Create form state (arrays, not comma strings)
   const [topicName, setTopicName] = useState('');
-  const [topicKeywords, setTopicKeywords] = useState('');
-  const [topicRss, setTopicRss] = useState('');
+  const [topicKeywords, setTopicKeywords] = useState<string[]>(['']);
+  const [topicRss, setTopicRss] = useState<string[]>(['']);
   const [topicFrequency, setTopicFrequency] = useState(4);
   const [topicPushTime, setTopicPushTime] = useState('08:00');
+  const [topicIsActive, setTopicIsActive] = useState(true);
   const [notice, setNotice] = useState('');
 
-  // Edit state
+  // Edit state (arrays)
   const [editingTopic, setEditingTopic] = useState<Topic | null>(null);
   const [editName, setEditName] = useState('');
-  const [editKeywords, setEditKeywords] = useState('');
-  const [editRss, setEditRss] = useState('');
+  const [editKeywords, setEditKeywords] = useState<string[]>([]);
+  const [editRss, setEditRss] = useState<string[]>([]);
   const [editFrequency, setEditFrequency] = useState(4);
   const [editPushTime, setEditPushTime] = useState('08:00');
+  const [editIsActive, setEditIsActive] = useState(true);
+
+  // RSS source detail expand per topic
+  const [expandedTopicSources, setExpandedTopicSources] = useState<number | null>(null);
 
   // System status
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
@@ -73,6 +133,11 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
       .catch(() => setRunStats([]));
   }, [runStatsTopicId, showDeveloperPanels]);
 
+  const clean = (arr: string[]) => arr.map(s => s.trim()).filter(Boolean);
+  const orderedTopics = [...topics].sort(
+    (a, b) => Number(b.is_active) - Number(a.is_active) || a.name.localeCompare(b.name),
+  );
+
   const createTopic = async () => {
     if (!topicName.trim()) { setNotice('Please enter a topic name.'); return; }
     setNotice('');
@@ -82,17 +147,21 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: topicName.trim(),
-          keywords: topicKeywords ? topicKeywords.split(',').map(k => k.trim()).filter(Boolean) : [],
-          rss_sources: topicRss ? topicRss.split(',').map(r => r.trim()).filter(Boolean) : [],
+          keywords: clean(topicKeywords),
+          rss_sources: clean(topicRss),
           scrape_frequency_hours: topicFrequency,
           push_time: topicPushTime,
           push_channels: ['discord'],
+          is_active: topicIsActive,
         }),
       });
       if (!res.ok) { setNotice('Topic creation failed.'); return; }
       onTopicsChange();
       setNotice('Topic created successfully!');
-      setTopicName(''); setTopicKeywords(''); setTopicRss('');
+      setTopicName('');
+      setTopicKeywords(['']);
+      setTopicRss(['']);
+      setTopicIsActive(true);
     } catch { setNotice('Topic creation failed.'); }
   };
 
@@ -107,22 +176,24 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
   const startEdit = (topic: Topic) => {
     setEditingTopic(topic);
     setEditName(topic.name);
-    setEditKeywords(topic.keywords.join(', '));
-    setEditRss(topic.rss_sources.join(', '));
+    setEditKeywords(topic.keywords.length > 0 ? [...topic.keywords] : ['']);
+    setEditRss(topic.rss_sources.length > 0 ? [...topic.rss_sources] : ['']);
     setEditFrequency(topic.scrape_frequency_hours);
     setEditPushTime(topic.push_time);
+    setEditIsActive(topic.is_active);
   };
 
   const saveEdit = async () => {
     if (!editingTopic) return;
     const payload: Record<string, unknown> = {};
     if (editName.trim() !== editingTopic.name) payload.name = editName.trim();
-    const newKw = editKeywords.split(',').map(k => k.trim()).filter(Boolean);
+    const newKw = clean(editKeywords);
     if (JSON.stringify(newKw) !== JSON.stringify(editingTopic.keywords)) payload.keywords = newKw;
-    const newRss = editRss.split(',').map(r => r.trim()).filter(Boolean);
+    const newRss = clean(editRss);
     if (JSON.stringify(newRss) !== JSON.stringify(editingTopic.rss_sources)) payload.rss_sources = newRss;
     if (editFrequency !== editingTopic.scrape_frequency_hours) payload.scrape_frequency_hours = editFrequency;
     if (editPushTime !== editingTopic.push_time) payload.push_time = editPushTime;
+    if (editIsActive !== editingTopic.is_active) payload.is_active = editIsActive;
     if (Object.keys(payload).length === 0) { setEditingTopic(null); return; }
     try {
       const res = await apiFetch(`/topics/${editingTopic.id}`, {
@@ -134,6 +205,25 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
       else setNotice('Update failed.');
     } catch { setNotice('Update failed.'); }
     setEditingTopic(null);
+  };
+
+  const toggleTopicActive = async (topic: Topic) => {
+    setNotice('');
+    try {
+      const res = await apiFetch(`/topics/${topic.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_active: !topic.is_active }),
+      });
+      if (!res.ok) {
+        setNotice('Status update failed.');
+        return;
+      }
+      setNotice(`${topic.name} ${topic.is_active ? 'paused' : 'enabled'}.`);
+      onTopicsChange();
+    } catch {
+      setNotice('Status update failed.');
+    }
   };
 
   const saveConfig = async () => {
@@ -170,38 +260,103 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
       <div className="settings-section">
         <h3 className="settings-section-title">Intelligence Scope</h3>
         <div className="grid-two settings-grid-scope">
-          <div className="card">
+          {/* ── Left: Focus Topics ──────────────────────── */}
+          <div className="card settings-scope-focus">
             <h3>Focus Topics</h3>
             <div className="topic-list settings-topic-list">
-              {topics.map((topic, idx) => {
+              {orderedTopics.map((topic, idx) => {
                 const color = getTopicColor(idx);
                 const isEditing = editingTopic?.id === topic.id;
+                const isSourcesExpanded = expandedTopicSources === topic.id;
                 return (
-                  <div key={topic.id} className="topic-card" style={{ borderLeftColor: color.border }}>
+                  <div key={topic.id} className={`topic-card ${topic.is_active ? '' : 'topic-card-inactive'}`} style={{ borderLeftColor: color.border }}>
                     {isEditing ? (
-                      <div className="form" style={{ flex: 1, gap: '8px' }}>
-                        <input value={editName} onChange={e => setEditName(e.target.value)} placeholder="Name" />
-                        <input value={editKeywords} onChange={e => setEditKeywords(e.target.value)} placeholder="Keywords (comma separated)" />
-                        <input value={editRss} onChange={e => setEditRss(e.target.value)} placeholder="RSS (comma separated)" />
+                      /* ── Edit mode ── */
+                      <div className="form topic-edit-form" style={{ flex: 1, gap: '10px' }}>
+                        <label>
+                          Name
+                          <input value={editName} onChange={e => setEditName(e.target.value)} placeholder="Topic name" />
+                        </label>
+
+                        <label>
+                          Keyword Groups
+                          <span className="label-hint">Use | for OR within a group, e.g. &quot;OpenAI | Anthropic | DeepMind&quot;</span>
+                        </label>
+                        <ListEditor
+                          items={editKeywords}
+                          onChange={setEditKeywords}
+                          placeholder="e.g. OpenAI | Anthropic | DeepMind"
+                          addLabel="Add Group"
+                        />
+
+                        <label>
+                          RSS Sources
+                          <span className="label-hint">One URL per row</span>
+                        </label>
+                        <ListEditor
+                          items={editRss}
+                          onChange={setEditRss}
+                          placeholder="https://example.com/feed/rss.xml"
+                          inputType="url"
+                          addLabel="Add Source"
+                        />
+
                         <div className="inline">
-                          <input type="number" min={1} value={editFrequency} onChange={e => setEditFrequency(Number(e.target.value))} />
-                          <input type="time" value={editPushTime} onChange={e => setEditPushTime(e.target.value)} />
+                          <label>Frequency (h)<input type="number" min={1} value={editFrequency} onChange={e => setEditFrequency(Number(e.target.value))} /></label>
+                          <label>Push time<input type="time" value={editPushTime} onChange={e => setEditPushTime(e.target.value)} /></label>
                         </div>
+                        <label className="settings-inline-check">
+                          <input type="checkbox" checked={editIsActive} onChange={(e) => setEditIsActive(e.target.checked)} />
+                          <span>Enabled in Focus Topics and scheduled refresh</span>
+                        </label>
                         <div style={{ display: 'flex', gap: '8px' }}>
                           <button className="paper-primary-btn" onClick={saveEdit}>Save</button>
                           <button className="ghost" onClick={() => setEditingTopic(null)}>Cancel</button>
                         </div>
                       </div>
                     ) : (
+                      /* ── View mode ── */
                       <>
-                        <div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
                           <div className="topic-name">{topic.name}</div>
-                          <div className="muted">{toCsv(topic.keywords) || 'No keywords'}</div>
-                          <div className="muted">
-                            {topic.rss_sources.length} RSS | every {topic.scrape_frequency_hours}h | push {topic.push_time}
+                          <div style={{ marginBottom: '6px' }}>
+                            <span className={`settings-badge ${topic.is_active ? 'status-on' : 'status-off'}`}>
+                              {topic.is_active ? 'Enabled' : 'Paused'}
+                            </span>
                           </div>
+                          <div className="keyword-tags">
+                            {topic.keywords.length > 0
+                              ? topic.keywords.map((kw, ki) => (
+                                  <span key={ki} className="keyword-tag">{kw}</span>
+                                ))
+                              : <span className="muted">No keywords</span>
+                            }
+                          </div>
+                          <div className="muted" style={{ marginTop: '4px' }}>
+                            <span
+                              className="source-count-toggle"
+                              onClick={() => setExpandedTopicSources(isSourcesExpanded ? null : topic.id)}
+                            >
+                              {topic.rss_sources.length} RSS sources {isSourcesExpanded ? '▾' : '▸'}
+                            </span>
+                            {' | '} every {topic.scrape_frequency_hours}h {' | '} push {topic.push_time}
+                          </div>
+                          {isSourcesExpanded && topic.rss_sources.length > 0 && (
+                            <div className="source-url-list">
+                              {topic.rss_sources.map((url, si) => (
+                                <div key={si} className="source-url-item">{url}</div>
+                              ))}
+                            </div>
+                          )}
                         </div>
-                        <div style={{ display: 'flex', gap: '6px' }}>
+                        <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
+                          <button
+                            className="delete-btn"
+                            onClick={() => toggleTopicActive(topic)}
+                            title={topic.is_active ? 'Pause this topic' : 'Enable this topic'}
+                          >
+                            {topic.is_active ? 'II' : '▶'}
+                          </button>
                           <button className="delete-btn" style={{ borderColor: color.border, color: color.text }} onClick={() => startEdit(topic)}>&#9998;</button>
                           <button className="delete-btn" onClick={() => deleteTopic(topic.id)}>&times;</button>
                         </div>
@@ -210,20 +365,47 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
                   </div>
                 );
               })}
-              {topics.length === 0 && <div className="muted" style={{ padding: '1rem', textAlign: 'center' }}>No topics yet. Use the form to create your first topic.</div>}
+              {orderedTopics.length === 0 && <div className="muted" style={{ padding: '1rem', textAlign: 'center' }}>No topics yet. Use the form to create your first topic.</div>}
             </div>
           </div>
 
-          <div className="card">
+          {/* ── Right: Topic Intake ─────────────────────── */}
+          <div className="card settings-scope-intake">
             <h3>Topic Intake</h3>
             <div className="form">
               <label>Name *<input value={topicName} onChange={e => setTopicName(e.target.value)} placeholder="e.g., AI Daily" /></label>
-              <label>Keywords (comma separated, optional)<input value={topicKeywords} onChange={e => setTopicKeywords(e.target.value)} placeholder="AI, LLM, GPT" /></label>
-              <label>RSS Sources (comma separated, optional)<textarea value={topicRss} onChange={e => setTopicRss(e.target.value)} rows={3} placeholder="https://hnrss.org/frontpage" /></label>
+
+              <label>
+                Keyword Groups
+                <span className="label-hint">Use | for OR within a group</span>
+              </label>
+              <ListEditor
+                items={topicKeywords}
+                onChange={setTopicKeywords}
+                placeholder="e.g. GPT | Claude | Gemini"
+                addLabel="Add Group"
+              />
+
+              <label>
+                RSS Sources
+                <span className="label-hint">One URL per row</span>
+              </label>
+              <ListEditor
+                items={topicRss}
+                onChange={setTopicRss}
+                placeholder="https://example.com/feed/rss.xml"
+                inputType="url"
+                addLabel="Add Source"
+              />
+
               <div className="inline">
                 <label>Frequency (hours)<input type="number" min={1} value={topicFrequency} onChange={e => setTopicFrequency(Number(e.target.value))} /></label>
                 <label>Push time<input type="time" value={topicPushTime} onChange={e => setTopicPushTime(e.target.value)} /></label>
               </div>
+              <label className="settings-inline-check">
+                <input type="checkbox" checked={topicIsActive} onChange={(e) => setTopicIsActive(e.target.checked)} />
+                <span>Enable immediately after create</span>
+              </label>
               <button className="paper-primary-btn" onClick={createTopic}>Create Topic</button>
               {notice && <div className="notice">{notice}</div>}
             </div>
@@ -415,7 +597,7 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
         </div>
       )}
 
-      {showDeveloperPanels && topics.length > 0 && (
+      {showDeveloperPanels && orderedTopics.length > 0 && (
         <div className="card" style={{ marginTop: '1rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h3>Execution History</h3>
@@ -424,7 +606,7 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
               value={runStatsTopicId ? String(runStatsTopicId) : ''}
               onChange={(e) => setRunStatsTopicId(Number(e.target.value))}
             >
-              {topics.map((topic) => (
+              {orderedTopics.map((topic) => (
                 <option key={topic.id} value={String(topic.id)}>
                   {topic.name}
                 </option>

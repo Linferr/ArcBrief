@@ -81,17 +81,21 @@ def _default_topic_presets() -> List[Dict]:
         {
             "name": "Global Trending",
             "keywords": [
-                "Breaking News", "Geopolitics", "Sanctions", "Tech Breakthrough",
-                "Election", "Trade War", "Policy Change", "Global Economy"
+                "Geopolitics | Sanctions | Trade War",
+                "Election | Referendum | Coup",
+                "NATO | UN | G7 | G20 | BRICS",
+                "War | Conflict | Ceasefire",
+                "Policy | Legislation | Executive Order",
             ],
             "rss_sources": [
-                "https://feeds.reuters.com/Reuters/worldNews",
-                "https://feeds.reuters.com/Reuters/PoliticsNews",
+                "https://news.google.com/rss/search?q=site:reuters.com+world&hl=en-US&gl=US",
+                "https://feeds.npr.org/1004/rss.xml",
                 "https://feeds.bbci.co.uk/news/world/rss.xml",
                 "https://feeds.bbci.co.uk/news/world/us_and_canada/rss.xml",
                 "https://www.aljazeera.com/xml/rss/all.xml",
-                "https://www.state.gov/feed/",
-                "https://www.whitehouse.gov/briefing-room/feed/",
+                "https://www.theguardian.com/world/rss",
+                "https://www.scmp.com/rss/91/feed",
+                "https://www.foreignaffairs.com/rss.xml",
             ],
             "scrape_frequency_hours": 4,
             "push_time": "08:00",
@@ -99,19 +103,22 @@ def _default_topic_presets() -> List[Dict]:
         },
         {
             "name": "Macro and Metals",
+            "is_active": False,
             "keywords": [
-                "Gold Price", "Spot Gold", "XAU", "Silver Price", "XAG",
-                "Federal Reserve", "Interest Rate", "Powell", "CPI",
-                "Inflation", "Treasury Yield"
+                "Gold | XAU | Silver | XAG | Platinum",
+                "Federal Reserve | Fed | Powell | FOMC",
+                "Interest Rate | Rate Cut | Rate Hike",
+                "CPI | Inflation | PCE | PPI",
+                "Treasury Yield | Bond | Dollar Index | DXY",
             ],
             "rss_sources": [
-                "https://www.kitco.com/rss/news/",
-                "https://feeds.reuters.com/reuters/businessNews",
-                "https://feeds.reuters.com/news/wealth",
+                "https://news.google.com/rss/search?q=site:kitco.com+gold&hl=en-US",
+                "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",
+                "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=20910258",
                 "https://www.marketwatch.com/rss/topstories",
                 "https://www.federalreserve.gov/feeds/press_all.xml",
                 "https://www.federalreserve.gov/feeds/speeches.xml",
-                "https://home.treasury.gov/news/press-releases/feed",
+                "https://news.google.com/rss/search?q=site:treasury.gov&hl=en-US",
                 "https://www.mining.com/feed/",
             ],
             "scrape_frequency_hours": 6,
@@ -121,19 +128,84 @@ def _default_topic_presets() -> List[Dict]:
         {
             "name": "AI Daily",
             "keywords": [
-                "AI", "OpenAI", "Anthropic", "Claude", "GPT",
-                "LLM", "大模型", "机器学习", "深度学习"
+                "OpenAI | Anthropic | Google DeepMind | Meta AI | Mistral | xAI",
+                "GPT | Claude | Gemini | Llama | Qwen | reasoning model",
+                "AI coding assistant | coding agent | Claude Code | Codex | OpenCode | Cursor | Cline",
+                "Agent | MCP | tool calling | workflow | RAG | evals",
+                "AI launch | model release | API update | benchmark | capability trend",
             ],
             "rss_sources": [
                 "https://hnrss.org/newest?q=AI",
                 "https://huggingface.co/blog/feed.xml",
-                "https://venturebeat.com/ai/feed/",
-                "https://www.theverge.com/ai-artificial-intelligence/rss/index.xml",
+                "https://venturebeat.com/feed/",
+                "https://www.theverge.com/rss/index.xml",
                 "https://www.marktechpost.com/feed/",
                 "https://blog.google/technology/ai/rss/",
+                "https://openai.com/blog/rss.xml",
+                "https://deepmind.google/blog/rss.xml",
+                "https://techcrunch.com/category/artificial-intelligence/feed/",
+                "https://www.technologyreview.com/feed/",
+                "http://export.arxiv.org/rss/cs.AI",
+                "https://www.wired.com/feed/tag/ai/latest/rss",
+                "https://simonwillison.net/atom/everything/",
+                "https://minimaxir.com/index.xml",
+                "https://www.geoffreylitt.com/feed.xml",
+                "https://garymarcus.substack.com/feed",
+                "https://www.wheresyoured.at/rss/",
+                "https://www.dwarkeshpatel.com/feed",
+                "https://joanwestenberg.com/rss",
+                "https://grantslatton.com/rss.xml",
             ],
             "scrape_frequency_hours": 4,
             "push_time": "09:00",
+            "push_channels": ["discord"],
+        },
+        {
+            "name": "AI Builder Signals",
+            "keywords": [
+                "vibe coding | AI IDE | AI workflow | developer tools",
+                "Claude Code | Codex | OpenCode | Cursor | Cline | Continue",
+                "MCP | tool use | local model | retrieval | evals | prompt ops",
+                "agent runtime | memory | planner | review loop | automation",
+            ],
+            "rss_sources": [
+                "https://simonwillison.net/atom/everything/",
+                "https://www.geoffreylitt.com/feed.xml",
+                "https://overreacted.io/rss.xml",
+                "https://mitchellh.com/feed.xml",
+                "https://matklad.github.io/feed.xml",
+                "https://skyfall.dev/rss.xml",
+                "https://xania.org/feed",
+                "https://danielchasehooper.com/feed.xml",
+                "https://blog.jim-nielsen.com/feed.xml",
+                "https://www.abortretry.fail/feed",
+            ],
+            "scrape_frequency_hours": 6,
+            "push_time": "10:30",
+            "push_channels": ["discord"],
+        },
+        {
+            "name": "AI Policy & Safety",
+            "keywords": [
+                "AI policy | AI regulation | governance | compliance | risk framework",
+                "EU AI Act | executive order | NIST AI RMF | ISO 42001 | OECD AI",
+                "AI safety | alignment | red teaming | model eval | model card",
+                "copyright lawsuit | antitrust | privacy | data protection | liability",
+            ],
+            "rss_sources": [
+                "https://news.google.com/rss/search?q=EU+AI+Act&hl=en-US&gl=US&ceid=US:en",
+                "https://news.google.com/rss/search?q=AI+safety+policy&hl=en-US&gl=US&ceid=US:en",
+                "https://news.google.com/rss/search?q=AI+copyright+lawsuit&hl=en-US&gl=US&ceid=US:en",
+                "https://www.technologyreview.com/feed/",
+                "https://www.wired.com/feed/tag/ai/latest/rss",
+                "https://www.theverge.com/rss/index.xml",
+                "https://pluralistic.net/feed/",
+                "https://anildash.com/feed.xml",
+                "https://www.wheresyoured.at/rss/",
+                "https://garymarcus.substack.com/feed",
+            ],
+            "scrape_frequency_hours": 6,
+            "push_time": "11:00",
             "push_channels": ["discord"],
         },
     ]
@@ -142,13 +214,79 @@ def _default_topic_presets() -> List[Dict]:
 def _sync_default_topic_sources(db: ArcBriefDB, defaults: List[Dict]) -> None:
     existing = {topic.name: topic for topic in db.list_topics()}
     for preset in defaults:
-        topic = existing.get(preset["name"])
-        if not topic:
+        if preset["name"] not in existing:
             db.create_topic(preset)
+
+
+_LEGACY_PRESET_MARKERS: Dict[str, Dict[str, List[str]]] = {
+    "Global Trending": {
+        "rss": [
+            "feeds.reuters.com/reuters/worldnews",
+            "feeds.reuters.com/reuters/politicsnews",
+            "www.state.gov/feed/",
+            "www.whitehouse.gov/briefing-room/feed/",
+        ],
+        "keywords": ["breaking news", "tech breakthrough"],
+    },
+    "Macro and Metals": {
+        "rss": [
+            "www.kitco.com/rss/news/",
+            "feeds.reuters.com/reuters/businessnews",
+            "feeds.reuters.com/news/wealth",
+            "home.treasury.gov/news/press-releases/feed",
+        ],
+        "keywords": ["spot gold", "treasury yield"],
+    },
+    "AI Daily": {
+        "rss": [
+            "https://venturebeat.com/ai/feed/",
+            "https://www.theverge.com/ai-artificial-intelligence/rss/index.xml",
+        ],
+        "keywords": ["stability aiperplexity", "xai，meta ai"],
+    },
+}
+
+
+def _should_backfill_legacy_topic(topic) -> bool:
+    markers = _LEGACY_PRESET_MARKERS.get(topic.name)
+    if not markers:
+        return False
+    normalized_rss = [(u or "").strip().lower() for u in (topic.rss_sources or [])]
+    normalized_keywords = [(k or "").strip().lower() for k in (topic.keywords or [])]
+    hits = 0
+    for marker in markers.get("rss", []):
+        if any(marker in u for u in normalized_rss):
+            hits += 1
+    for marker in markers.get("keywords", []):
+        if any(marker in kw for kw in normalized_keywords):
+            hits += 1
+    # Require at least two legacy hits to avoid overwriting intentionally customized topics.
+    return hits >= 2
+
+
+def _backfill_legacy_default_topics(db: ArcBriefDB, defaults: List[Dict]) -> int:
+    defaults_by_name = {preset["name"]: preset for preset in defaults}
+    updated = 0
+    for topic in db.list_topics():
+        preset = defaults_by_name.get(topic.name)
+        if not preset:
             continue
-        merged_sources = list(dict.fromkeys((topic.rss_sources or []) + (preset.get("rss_sources") or [])))
-        if merged_sources != (topic.rss_sources or []):
-            db.update_topic(topic.id, {"rss_sources": merged_sources})
+        if not _should_backfill_legacy_topic(topic):
+            continue
+        db.update_topic(
+            topic.id,
+            {
+                "keywords": preset.get("keywords", []),
+                "rss_sources": preset.get("rss_sources", []),
+                "scrape_frequency_hours": int(preset.get("scrape_frequency_hours", topic.scrape_frequency_hours)),
+                "push_time": preset.get("push_time", topic.push_time),
+                "push_channels": preset.get("push_channels", topic.push_channels),
+                "is_active": bool(preset.get("is_active", topic.is_active)),
+            },
+        )
+        updated += 1
+        logger.info("Backfilled legacy default topic: %s (id=%s)", topic.name, topic.id)
+    return updated
 
 
 def _expected_api_key() -> str:
@@ -451,6 +589,9 @@ def _startup() -> None:
             DB.create_topic(preset)
     else:
         _sync_default_topic_sources(DB, defaults)
+        backfilled = _backfill_legacy_default_topics(DB, defaults)
+        if backfilled:
+            logger.info("Legacy default topic backfill updated %s topics.", backfilled)
 
     tavily_key = os.getenv("TAVILY_API_KEY", "")
     discord_token = os.getenv("DISCORD_TOKEN", "")
@@ -702,6 +843,22 @@ def collect_topic(topic_id: int, dry_run: bool = False):
             _collecting_topics[topic_id] = False
 
 
+def _load_brief_items(topic_id: int, date_str: str) -> List[Dict]:
+    """Load articles for brief generation with same-day-first policy."""
+    if DB is None:
+        return []
+    same_day_only = os.getenv("ARCBRIEF_BRIEF_SAME_DAY_ONLY", "1") == "1"
+    if same_day_only:
+        items = DB.get_articles_by_date(topic_id, date_str)
+        if items:
+            return items
+        allow_fallback = os.getenv("ARCBRIEF_BRIEF_ALLOW_CROSS_DAY_FALLBACK", "0") == "1"
+        if not allow_fallback:
+            return []
+    brief_hours = int(os.getenv("ARCBRIEF_NEWS_MAX_AGE_HOURS", "48"))
+    return DB.get_recent_articles(topic_id, hours=brief_hours)
+
+
 @app.post("/api/topics/{topic_id}/brief")
 def generate_brief(topic_id: int):
     if DB is None:
@@ -710,14 +867,13 @@ def generate_brief(topic_id: int):
     if not topic:
         raise HTTPException(status_code=404, detail="Topic not found")
     started = datetime.utcnow().isoformat()
-    brief_hours = int(os.getenv("ARCBRIEF_NEWS_MAX_AGE_HOURS", "48"))
+    date_str = datetime.now().strftime("%Y-%m-%d")
     try:
-        items = DB.get_recent_articles(topic_id, hours=brief_hours)
+        items = _load_brief_items(topic_id, date_str)
         source_weights = DB.get_source_reputations(topic_id)
         config = DB.get_app_config()
         merged_config = {**APP_CONFIG_DEFAULTS, **config}
         brief = build_brief_for_topic(topic, items, source_weights=source_weights, app_config=merged_config)
-        date_str = datetime.now().strftime("%Y-%m-%d")
         DB.save_brief(topic_id, date_str, brief, len(items))
         DB.log_brief_run(topic.id, "brief", "ok", items_collected=len(items), started_at=started)
         return {"topic_id": topic.id, "date": date_str, "items": len(items)}
@@ -738,6 +894,10 @@ def collect_all():
     failed_topics = 0
     skipped_topics = 0
     for topic in DB.list_topics():
+        if not topic.is_active:
+            skipped_topics += 1
+            results.append({"topic_id": topic.id, "topic_name": topic.name, "status": "inactive"})
+            continue
         with _collect_lock:
             if _collecting_topics.get(topic.id):
                 skipped_topics += 1
@@ -779,11 +939,12 @@ def generate_brief_all():
         raise HTTPException(status_code=500, detail="DB not initialized")
     results = []
     date_str = datetime.now().strftime("%Y-%m-%d")
-    brief_hours = int(os.getenv("ARCBRIEF_NEWS_MAX_AGE_HOURS", "48"))
     config = DB.get_app_config()
     merged_config = {**APP_CONFIG_DEFAULTS, **config}
     for topic in DB.list_topics():
-        items = DB.get_recent_articles(topic.id, hours=brief_hours)
+        if not topic.is_active:
+            continue
+        items = _load_brief_items(topic.id, date_str)
         source_weights = DB.get_source_reputations(topic.id)
         brief = build_brief_for_topic(topic, items, source_weights=source_weights, app_config=merged_config)
         DB.save_brief(topic.id, date_str, brief, len(items))
