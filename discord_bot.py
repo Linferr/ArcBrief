@@ -11,11 +11,15 @@ from discord import app_commands
 
 API_BASE = os.getenv("ARCBRIEF_API_BASE", "http://localhost:8000/api")
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
+API_KEY = os.getenv("ARCBRIEF_API_KEY", "arcbrief-local-dev-key")
 
 
 async def api_get(path: str) -> Any:
     async with aiohttp.ClientSession() as session:
-        async with session.get(f"{API_BASE}{path}") as res:
+        async with session.get(
+            f"{API_BASE}{path}",
+            headers={"X-API-Key": API_KEY},
+        ) as res:
             if res.status >= 400:
                 raise RuntimeError(f"GET {path} failed: {res.status}")
             return await res.json()
@@ -26,7 +30,7 @@ async def api_post(path: str, payload: Optional[Dict[str, Any]] = None) -> Any:
         async with session.post(
             f"{API_BASE}{path}",
             json=payload,
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", "X-API-Key": API_KEY},
         ) as res:
             if res.status >= 400:
                 raise RuntimeError(f"POST {path} failed: {res.status}")

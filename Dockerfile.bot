@@ -1,0 +1,11 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+# Discord slash command bot（长驻进程，无需 WeasyPrint 系统库）
+CMD ["python", "discord_bot.py"]

@@ -254,7 +254,7 @@ export default function ResearchPanel({ onRunningChange, pendingQuery, onPending
 
   return (
     <section className="panel research-panel">
-      <div className="module-head">
+      <div className="module-head divider-soft pb-4">
         <h2>Research Run</h2>
         <p className="ui-font">Pose a question; the agent decomposes, searches, critiques, and drafts a report.</p>
       </div>
@@ -289,26 +289,26 @@ export default function ResearchPanel({ onRunningChange, pendingQuery, onPending
           </div>
           <div className="pipeline-timeline">
             <div className={`timeline-item ${currentStep > 0 ? 'done' : currentStep === 0 ? 'active' : 'pending'}`}>
-              <h5>Query Decomposition</h5>
+              <h5 style={{ fontFamily: 'var(--font-ui)' }}>Query Decomposition</h5>
               <p>
                 {currentStep >= 0 ? `Mapped into ${totalParagraphs} analysis segments.` : 'Awaiting run start.'}
                 {currentStep >= 0 && <span className="highlight-mark">Completed</span>}
               </p>
             </div>
             <div className={`timeline-item ${currentStep > 1 ? 'done' : currentStep === 1 ? 'active' : 'pending'}`}>
-              <h5>Deep Web Extraction</h5>
+              <h5 style={{ fontFamily: 'var(--font-ui)' }}>Deep Web Extraction</h5>
               <p>{extractionLine || 'Collecting evidence across sources.'}</p>
-              <div className="ink-meter">
+              <div className="ink-meter" style={{ marginTop: '8px' }}>
                 <span style={{ width: `${Math.max(progress, 0.05) * 100}%` }} />
               </div>
-              {currentStep >= 1 && <span className="highlight-mark">Round {currentRound}/{totalRounds}</span>}
+              {currentStep >= 1 && <span className="highlight-mark" style={{ display: 'inline-block', marginTop: '6px', marginLeft: 0 }}>Round {currentRound}/{totalRounds}</span>}
             </div>
             <div className={`timeline-item ${currentStep === 2 ? 'active' : currentStep > 2 ? 'done' : 'pending'}`}>
-              <h5>Synthesis & Reporting</h5>
+              <h5 style={{ fontFamily: 'var(--font-ui)' }}>Synthesis & Reporting</h5>
               <p>{currentStep >= 2 ? 'Composing final narrative and citations.' : 'Waiting for extraction...'}</p>
             </div>
           </div>
-          <div className="muted pipeline-label ui-font">{progressLabel}</div>
+          <div className="muted pipeline-label ui-font" style={{ marginTop: '16px' }}>{progressLabel}</div>
           <div className="log compact-log" id="research-log">
             {events.slice(-8).map((e, idx) => (
               <div key={idx} className="log-line">
@@ -318,43 +318,45 @@ export default function ResearchPanel({ onRunningChange, pendingQuery, onPending
           </div>
         </div>
 
-        <div className="card report-card">
-          <h4 className="section-eyebrow">Report Preview</h4>
-          <div className="report-toolbar">
-            <button className="ghost" onClick={() => runId && openReport({ run_id: runId, query, status })} disabled={!runId}>
-              Full Report
-            </button>
-            {runId && (
-              <button className="ghost-link" onClick={() => downloadReportPdf(runId)}>
-                Export PDF
+        <div className="card report-card" style={{ padding: '0', background: 'transparent', border: 'none' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+            <h4 className="section-eyebrow" style={{ margin: 0 }}>Report Preview</h4>
+            <div className="report-toolbar" style={{ margin: 0 }}>
+              <button className="ghost" onClick={() => runId && openReport({ run_id: runId, query, status })} disabled={!runId}>
+                Full Report
               </button>
-            )}
-            {previewRunId && (
-              <button className="ghost" onClick={clearPreview}>
-                Clear
-              </button>
-            )}
+              {runId && (
+                <button className="ghost-link" onClick={() => downloadReportPdf(runId)}>
+                  Export PDF
+                </button>
+              )}
+              {previewRunId && (
+                <button className="ghost" onClick={clearPreview}>
+                  Clear
+                </button>
+              )}
+            </div>
           </div>
 
           {previewLoading && <div className="muted">Loading preview...</div>}
           {!previewLoading && activePreview ? (
             <div className="report-paper deep-paper">
               <div className="report-paper-head ui-font">
-                <span>{previewQuery || 'Research query'}</span>
+                <span style={{ fontFamily: 'var(--font-serif)', fontSize: '14px', fontWeight: 'bold', color: 'var(--text-primary)' }}>{previewQuery || 'Research query'}</span>
                 <span>{new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
               </div>
-              <pre className="report-preview">{markdownToPlainText(activePreview).split('\n').slice(0, 22).join('\n')}</pre>
+              <pre className="report-preview" style={{ fontFamily: 'var(--font-serif)' }}>{markdownToPlainText(activePreview).split('\n').slice(0, 22).join('\n')}</pre>
               <div className="report-watermark mono">REF: {previewRunId || runId || 'N/A'}</div>
             </div>
           ) : (
-            !previewLoading && <div className="muted">No report yet.</div>
+            !previewLoading && <div className="muted" style={{ padding: '24px', background: 'var(--bg-sidebar)', border: '1px solid var(--border-color)', borderRadius: '4px' }}>No report yet.</div>
           )}
         </div>
       </div>
 
-      <div className="card history">
-        <div className="history-head">
-          <h3>Recent Runs ({historyTotal} total)</h3>
+      <div className="card history" style={{ marginTop: '32px' }}>
+        <div className="history-head divider-soft pb-2">
+          <h3 style={{ fontFamily: 'var(--font-serif)' }}>Recent Runs ({historyTotal} total)</h3>
           <div className="history-filters ui-font">
             <select
               value={historyStatus}
@@ -382,8 +384,8 @@ export default function ResearchPanel({ onRunningChange, pendingQuery, onPending
           {history.map((h) => (
             <div key={h.run_id} className="history-item clickable" onClick={() => previewFromHistory(h)}>
               <div>
-                <div className="history-title">{h.query}</div>
-                <div className="muted">
+                <div className="history-title" style={{ fontFamily: 'var(--font-serif)' }}>{h.query}</div>
+                <div className="muted ui-font">
                   {h.status}
                   {h.created_at ? ` | ${new Date(h.created_at).toLocaleString()}` : ''}
                 </div>
@@ -442,7 +444,7 @@ export default function ResearchPanel({ onRunningChange, pendingQuery, onPending
             <div className="report-modal-header">
               <div>
                 <div className="eyebrow">Full Report</div>
-                <h3>{selectedRun?.query || 'Report'}</h3>
+                <h3 style={{ fontFamily: 'var(--font-serif)' }}>{selectedRun?.query || 'Report'}</h3>
               </div>
               <div className="report-modal-actions">
                 {selectedRun && <button onClick={() => downloadReportPdf(selectedRun.run_id)}>Download PDF</button>}
@@ -452,7 +454,7 @@ export default function ResearchPanel({ onRunningChange, pendingQuery, onPending
             {reportLoading ? (
               <div className="muted">Loading report...</div>
             ) : (
-              <pre className="report-full">{markdownToPlainText(fullReport || 'No report content.')}</pre>
+              <pre className="report-full" style={{ fontFamily: 'var(--font-serif)' }}>{markdownToPlainText(fullReport || 'No report content.')}</pre>
             )}
           </div>
         </div>
@@ -460,4 +462,3 @@ export default function ResearchPanel({ onRunningChange, pendingQuery, onPending
     </section>
   );
 }
-

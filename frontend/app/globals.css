@@ -103,6 +103,7 @@ code,
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--text-tertiary);
+  font-weight: 500;
 }
 
 .side-nav {
@@ -133,9 +134,21 @@ code,
 }
 
 .nav-item.active {
-  background: rgba(0, 0, 0, 0.05);
+  background: rgba(0, 0, 0, 0.06);
   color: var(--text-primary);
   font-weight: 600;
+  position: relative;
+}
+
+.nav-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 10%;
+  height: 80%;
+  width: 3px;
+  background-color: var(--text-primary);
+  border-radius: 0 2px 2px 0;
 }
 
 .nav-item.running::after {
@@ -158,8 +171,8 @@ code,
 }
 
 .nav-icon svg {
-  width: 14px;
-  height: 14px;
+  width: 18px;
+  height: 18px;
 }
 
 .library-group {
@@ -2189,4 +2202,36 @@ code,
   font-weight: 600;
   color: var(--text-secondary);
   margin-bottom: 0;
+}
+
+/* 图标基础类：统一样式，自动适应主题色 */
+.icon-line {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.icon-brand { 
+  stroke-width: 1.8; 
+}
+
+/* 细节排版优化 */
+.list-diamond li { 
+  display: flex; 
+  align-items: start; 
+}
+.list-diamond li::before {
+  content: '◆'; 
+  font-size: 0.6em; 
+  color: var(--text-secondary); 
+  margin-right: 0.75rem; 
+  margin-top: 0.35rem; 
+  opacity: 0.7;
+}
+
+.divider-soft { 
+  border-bottom: 1px solid var(--border-color); 
+  opacity: 0.7; 
 }

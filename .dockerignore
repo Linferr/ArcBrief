@@ -1,0 +1,17 @@
+__pycache__
+*.pyc
+*.pyo
+.env
+.env.*
+!.env.example
+arcbrief.db
+arcbrief.db-shm
+arcbrief.db-wal
+logs/
+outputs/
+node_modules/
+frontend/.next/
+frontend/node_modules/
+.git/
+*.db-shm
+*.db-wal

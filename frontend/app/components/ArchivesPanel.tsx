@@ -75,7 +75,7 @@ export default function ArchivesPanel({ topics }: Props) {
 
   return (
     <section className="panel archives-panel">
-      <div className="module-head">
+      <div className="module-head divider-soft pb-4">
         <h2>Brief Archive</h2>
         <p className="ui-font">Browse historical briefings across topics and export snapshots.</p>
       </div>
@@ -92,9 +92,20 @@ export default function ArchivesPanel({ topics }: Props) {
             ))}
           </select>
         </label>
-        <button className="ghost" onClick={() => loadArchives(topicFilter)} disabled={loading}>
-          {loading ? 'Refreshing...' : 'Refresh'}
+
+        <button 
+          className="ghost group" 
+          style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '32px', padding: '0 12px' }} 
+          onClick={() => loadArchives(topicFilter)} 
+          disabled={loading}
+        >
+          <svg className="icon-line group-hover:stroke-[var(--text-primary)] transition-colors" style={{ width: '14px', height: '14px' }} viewBox="0 0 24 24">
+            <path d="M21 12a9 9 0 11-2.5-7.5" />
+            <path d="M21 4.5v7.5h-7.5" />
+          </svg>
+          <span style={{ fontSize: '12px', fontWeight: 500 }}>{loading ? 'Refreshing...' : 'Refresh'}</span>
         </button>
+
       </div>
 
       {notice && <div className="notice">{notice}</div>}
@@ -103,7 +114,7 @@ export default function ArchivesPanel({ topics }: Props) {
         <div className="card archives-list">
           <h4 className="section-eyebrow">Archive Index</h4>
           <div className="archives-items">
-            {loading && <div className="muted">Loading...</div>}
+            {loading && <div className="muted ui-font text-sm">Loading...</div>}
             {!loading &&
               items.map((item) => (
                 <button
@@ -111,37 +122,48 @@ export default function ArchivesPanel({ topics }: Props) {
                   className={`archives-item ${selectedBrief?.id === item.id ? 'active' : ''}`}
                   onClick={() => setSelectedBriefId(item.id)}
                 >
-                  <div className="archives-item-title">{item.topic_name}</div>
-                  <div className="archives-item-meta">
+                  <div className="archives-item-title" style={{ fontFamily: 'var(--font-serif)' }}>{item.topic_name}</div>
+                  <div className="archives-item-meta ui-font">
                     {item.item_count} items | {formatBriefTime(item.created_at, item.date)}
                   </div>
                 </button>
               ))}
             {!loading && items.length === 0 && (
-              <div className="muted">No archived briefs yet. Generate briefs from Daily Brief first.</div>
+              <div className="muted ui-font text-sm">No archived briefs yet. Generate briefs from Daily Brief first.</div>
             )}
           </div>
         </div>
 
-        <div className="card archives-preview">
-          <div className="report-toolbar">
-            <h4 className="section-eyebrow">Preview</h4>
+        <div className="card archives-preview" style={{ padding: 0, border: 'none', background: 'transparent' }}>
+          <div className="report-toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+            <h4 className="section-eyebrow" style={{ margin: 0 }}>Preview</h4>
             {selectedBrief && (
-              <button className="ghost-link" onClick={() => exportBriefPdf(selectedBrief.id)}>
-                Export PDF
+
+              <button 
+                className="ghost group" 
+                style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '32px', padding: '0 12px' }} 
+                onClick={() => exportBriefPdf(selectedBrief.id)}
+              >
+                <svg className="icon-line group-hover:stroke-[var(--text-primary)] transition-colors" style={{ width: '14px', height: '14px' }} viewBox="0 0 24 24">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="7 10 12 15 17 10"></polyline>
+                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                <span style={{ fontSize: '12px', fontWeight: 500 }}>Export PDF</span>
               </button>
+
             )}
           </div>
           {selectedBrief ? (
             <div className="report-paper">
               <div className="report-paper-head ui-font">
-                <span>{selectedBrief.topic_name}</span>
+                <span style={{ fontFamily: 'var(--font-serif)', fontSize: '15px', fontWeight: 'bold', color: 'var(--text-primary)' }}>{selectedBrief.topic_name}</span>
                 <span>{formatBriefTime(selectedBrief.created_at, selectedBrief.date)}</span>
               </div>
-              <pre className="brief-content">{markdownToPlainText(selectedBrief.content)}</pre>
+              <pre className="brief-content" style={{ fontFamily: 'var(--font-serif)' }}>{markdownToPlainText(selectedBrief.content)}</pre>
             </div>
           ) : (
-            <div className="muted">Select a brief to preview content.</div>
+            <div className="muted" style={{ padding: '24px', background: 'var(--bg-sidebar)', border: '1px solid var(--border-color)', borderRadius: '4px' }}>Select a brief to preview content.</div>
           )}
         </div>
       </div>

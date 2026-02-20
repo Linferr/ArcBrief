@@ -59,9 +59,10 @@ export default function Page() {
         key: 'news',
         label: 'Daily Brief',
         icon: (
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-            <path d="M5 5h10a2 2 0 0 1 2 2v12H7a2 2 0 0 0-2 2V5z" />
-            <path d="M7 7h8M7 11h8M7 15h6" />
+          <svg viewBox="0 0 24 24" className="icon-line" aria-hidden>
+            <path d="M4 22h16a2 2 0 002-2V4a2 2 0 00-2-2H8a2 2 0 00-2 2v16a2 2 0 01-2 2z" />
+            <path d="M14 9l-2 2 2 2m-2-2h6" />
+            <path d="M9 12h.01" strokeWidth="2.5" />
           </svg>
         ),
       },
@@ -69,9 +70,10 @@ export default function Page() {
         key: 'research',
         label: 'Deep Research',
         icon: (
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-            <circle cx="11" cy="11" r="7" />
-            <path d="M20 20l-3.5-3.5" />
+          <svg viewBox="0 0 24 24" className="icon-line" aria-hidden>
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            <path d="M11 7v4m-2-2h4" opacity="0.7" />
           </svg>
         ),
       },
@@ -79,9 +81,16 @@ export default function Page() {
         key: 'settings',
         label: 'Settings',
         icon: (
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-            <path d="M12 8.5A3.5 3.5 0 1 1 8.5 12 3.5 3.5 0 0 1 12 8.5Z" />
-            <path d="M19.4 15a1 1 0 0 0 .2 1.1l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9V20a2 2 0 0 1-4 0v-.2a1 1 0 0 0-.6-.9 1 1 0 0 0-1.1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1 1 0 0 0 .2-1.1 1 1 0 0 0-.9-.6H4a2 2 0 0 1 0-4h.2a1 1 0 0 0 .9-.6 1 1 0 0 0-.2-1.1l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1 1 0 0 0 1.1.2h.2a1 1 0 0 0 .6-.9V4a2 2 0 0 1 4 0v.2a1 1 0 0 0 .6.9h.2a1 1 0 0 0 1.1-.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1 1 0 0 0-.2 1.1v.2a1 1 0 0 0 .9.6H20a2 2 0 0 1 0 4h-.2a1 1 0 0 0-.9.6z" />
+          <svg viewBox="0 0 24 24" className="icon-line" aria-hidden>
+            <line x1="4" y1="21" x2="4" y2="14" />
+            <line x1="4" y1="10" x2="4" y2="3" />
+            <line x1="12" y1="21" x2="12" y2="12" />
+            <line x1="12" y1="8" x2="12" y2="3" />
+            <line x1="20" y1="21" x2="20" y2="16" />
+            <line x1="20" y1="12" x2="20" y2="3" />
+            <line x1="1" y1="14" x2="7" y2="14" />
+            <line x1="9" y1="8" x2="15" y2="8" />
+            <line x1="17" y1="16" x2="23" y2="16" />
           </svg>
         ),
       },
@@ -99,12 +108,15 @@ export default function Page() {
   return (
     <div className="app">
       <aside className="sidebar">
-        <div className="brand">
-          <div className="brand-title">
-            <span className="brand-bar" />
-            ArcBrief
+        <div className="brand" style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '0 24px', marginBottom: '28px' }}>
+          <svg className="icon-line icon-brand" style={{ width: '32px', height: '32px', color: 'var(--text-primary)', flexShrink: 0 }} viewBox="0 0 24 24" aria-hidden>
+            <path d="M12 2L2 22h20L12 2z" />
+            <path d="M6.5 13.5c2.5-3 7.5-3 11 0" /> 
+          </svg>
+          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+            <div className="brand-title" style={{ fontSize: '21px', fontWeight: 700, letterSpacing: '0.02em', lineHeight: 1.1, padding: 0, margin: 0, display: 'block' }}>ArcBrief</div>
+            <div className="brand-subtitle" style={{ fontSize: '10px', letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--text-tertiary)', fontWeight: 600, paddingLeft: 0, margin: '2px 0 0 0' }}>Intelligence Desk</div>
           </div>
-          <p className="brand-subtitle">Intelligence Desk</p>
         </div>
 
         <nav className="side-nav">
@@ -127,9 +139,11 @@ export default function Page() {
             <div className="library-title">Library</div>
             <button className={`nav-item ${panel === 'archives' ? 'active' : ''}`} onClick={() => setPanel('archives')}>
               <span className="nav-icon" aria-hidden>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-                  <path d="M4 6h8a2 2 0 0 1 2 2v10H6a2 2 0 0 0-2 2V6z" />
-                  <path d="M14 9h6v11H14z" />
+                <svg viewBox="0 0 24 24" className="icon-line">
+                  <polyline points="21 8 21 21 3 21 3 8" />
+                  <rect x="1" y="3" width="22" height="5" />
+                  <line x1="10" y1="12" x2="14" y2="12" />
+                  <path d="M16.5 16.5c1-1 1-2.5 1-2.5s-.5-2-2-2.5" opacity="0.6"/>
                 </svg>
               </span>
               <span>Archives</span>
@@ -185,15 +199,19 @@ export default function Page() {
 
       <button
         className="floating-theme-btn"
+        style={{ border: '2px solid var(--bg-main)' }}
         onClick={() => setTheme((prev) => (prev === 'warm' ? 'cool' : 'warm'))}
         aria-label={theme === 'warm' ? 'Switch to cool mode' : 'Switch to paper mode'}
         title={theme === 'warm' ? 'Switch to cool mode' : 'Switch to paper mode'}
       >
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+        <svg viewBox="0 0 24 24" className="icon-line" style={{ width: '20px', height: '20px' }} aria-hidden>
           {theme === 'warm' ? (
-            <path d="M20.354 15.354A9 9 0 0 1 8.646 3.646 9.003 9.003 0 0 0 12 21a9.003 9.003 0 0 0 8.354-5.646z" />
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
           ) : (
-            <path d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364-.707-.707M6.343 6.343l-.707-.707m12.728 0-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0z" />
+            <>
+              <circle cx="12" cy="12" r="5"/>
+              <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+            </>
           )}
         </svg>
       </button>

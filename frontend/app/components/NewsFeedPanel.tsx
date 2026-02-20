@@ -133,7 +133,7 @@ const parseBriefView = (content: string): ParsedBriefView => {
   const sourceItems = sources.map(parseSourceLine);
   const lines = (body || '').split('\n');
 
-    const entries: RenderedBriefEntry[] = [];
+  const entries: RenderedBriefEntry[] = [];
   let currentCluster = 'other';
   let current: RenderedBriefEntry | null = null;
   let mode: 'summary' | 'takeaways' = 'summary';
@@ -146,7 +146,7 @@ const parseBriefView = (content: string): ParsedBriefView => {
     current = null;
   };
 
-    for (const rawLine of lines) {
+  for (const rawLine of lines) {
     const line = rawLine.trim();
     if (!line || line === '---') continue;
 
@@ -206,15 +206,15 @@ const parseBriefView = (content: string): ParsedBriefView => {
       continue;
     }
 
-      const relatedLine = line.match(/related articles:\s*(\d+)/i);
-      if (relatedLine) {
-        current.relatedArticles = Number(relatedLine[1]) || 0;
-        continue;
-      }
+    const relatedLine = line.match(/related articles:\s*(\d+)/i);
+    if (relatedLine) {
+      current.relatedArticles = Number(relatedLine[1]) || 0;
+      continue;
+    }
 
-      if (/^\*?evidence refs:\s*/i.test(line)) {
-        continue;
-      }
+    if (/^\*?evidence refs:\s*/i.test(line)) {
+      continue;
+    }
 
     if (mode === 'takeaways' && line.startsWith('- ')) {
       const item = line.slice(2).trim();
@@ -248,6 +248,7 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
   const [refreshStats, setRefreshStats] = useState<{ collected: number; saved: number; duplicates: number } | null>(null);
   const [notice, setNotice] = useState('');
   const [feedback, setFeedback] = useState<{ upvotes: number; downvotes: number } | null>(null);
+  
   const activeTopics = useMemo(() => topics.filter((topic) => topic.is_active), [topics]);
   const activeTopicIdSet = useMemo(() => new Set(activeTopics.map((topic) => topic.id)), [activeTopics]);
 
@@ -317,7 +318,6 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
         return;
       }
 
-      // Brief may be generated from previous-day fallback sources. Try source dates before giving up.
       const hintDates = Array.from(
         new Set(
           sourceHints
@@ -377,7 +377,6 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
       loadBriefHistory(activeTopic, pendingBriefId);
       if (pendingBriefId) setPendingBriefId(null);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTopic, pendingBriefId]);
 
   const selectedBrief = useMemo(
@@ -482,7 +481,6 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
   const isRefreshing = refreshPhase !== 'idle' && refreshPhase !== 'done';
   const selectedView = selectedBrief ? parseBriefView(selectedBrief.content || '') : null;
   const synthesisEntry = selectedView?.entries?.find(e => e.clusterLabel === '__synthesis__') || null;
-  const clusterEntries = selectedView?.entries?.filter(e => e.clusterLabel !== '__synthesis__') || [];
 
   const compactSourceName = (source: string): string => {
     const raw = (source || '').trim();
@@ -507,7 +505,6 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
       .replace(/source body is unavailable; summary uses headline-level evidence\.?/gi, ' ')
       .replace(/\s+/g, ' ')
       .trim();
-    // collapse obvious duplicated sentence pattern from low-signal feeds
     const sentenceParts = text.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter(Boolean);
     if (sentenceParts.length >= 2 && sentenceParts[0].toLowerCase() === sentenceParts[1].toLowerCase()) {
       text = sentenceParts.slice(1).join(' ').trim();
@@ -545,7 +542,7 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
 
   return (
     <section className="panel panel-brief">
-      <div className="module-head">
+      <div className="module-head divider-soft pb-4">
         <h2>Daily Briefing</h2>
         <p className="ui-font">
           {new Date().toLocaleDateString('en-US', {
@@ -573,15 +570,24 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
           );
         })}
 
-        <button className="refresh-inline-btn ui-font" onClick={refreshAndGenerateAll} disabled={isRefreshing}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-            <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
+      <button 
+        className="ghost group" 
+        style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '32px', padding: '0 12px', marginLeft: 'auto' }} 
+        onClick={refreshAndGenerateAll} 
+        disabled={isRefreshing}
+      >
+        <svg className="icon-line group-hover:stroke-[var(--text-primary)] transition-colors" style={{ width: '14px', height: '14px' }} viewBox="0 0 24 24" aria-hidden>
+          <path d="M21 12a9 9 0 11-2.5-7.5" />
+          <path d="M21 4.5v7.5h-7.5" />
+          <path d="M17 9l-3-3m0 0l-3 3m3-3v8" opacity="0.5" strokeWidth="1"/> 
+        </svg>
+        <span style={{ fontSize: '12px', fontWeight: 500 }}>
           {isRefreshing ? (refreshPhase === 'collecting' ? 'Collecting...' : 'Generating...') : 'Refresh Brief'}
-        </button>
+        </span>
+      </button>
 
         {activeTopics.length === 0 && (
-          <div className="card" style={{ textAlign: 'center', padding: '2rem' }}>
+          <div className="card" style={{ textAlign: 'center', padding: '2rem', width: '100%' }}>
             <h3>Start Your News Feed</h3>
             <p className="muted">Create topics to track news by keywords and RSS sources.</p>
             <button onClick={onNavigateSettings} style={{ marginTop: '0.5rem' }}>Create Your First Topic</button>
@@ -593,7 +599,7 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
         <div className="card brief-card all-topics-card">
           <div className="brief-card-head">
             <div className="brief-title-group">
-              <h3>All Topics Digest</h3>
+              <h3 style={{ fontFamily: 'var(--font-serif)' }}>All Topics Digest</h3>
               <span className="brief-subtitle">Latest brief from each topic</span>
             </div>
           </div>
@@ -610,13 +616,13 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
               return (
                 <article key={brief.id} className="all-topic-section">
                   <div className="all-topic-head">
-                    <h4>{brief.topic_name || topic?.name || `Topic ${brief.topic_id}`}</h4>
+                    <h4 style={{ fontFamily: 'var(--font-serif)' }}>{brief.topic_name || topic?.name || `Topic ${brief.topic_id}`}</h4>
                     <span className="source-meta">{formatBriefTimestamp(brief)}</span>
                   </div>
 
                   {topicSynthesis ? (
                     <div className="brief-render-stack">
-                      <article className="brief-article">
+                      <article className="brief-article" style={{ borderLeftColor: 'var(--border-color)', paddingLeft: '16px' }}>
                         <div className="brief-article-head ui-font">
                           <div className="brief-article-meta">
                             <span className="brief-chip">{topicSynthesis.topicTag || 'Daily Executive Summary'}</span>
@@ -625,11 +631,14 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
                           </div>
                           <span className="brief-article-count">{topicSynthesis.relatedArticles || brief.item_count} articles</span>
                         </div>
-                        <h5 className="brief-headline">{topicSynthesis.headline || 'Daily Executive Summary'}</h5>
+                        <h5 className="brief-headline" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <svg className="icon-line" style={{ width: '18px', height: '18px', color: '#d97706', opacity: 0.8 }} viewBox="0 0 24 24"><path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" /></svg>
+                          {topicSynthesis.headline || 'Daily Executive Summary'}
+                        </h5>
                         <p className="brief-summary">{topicSynthesis.summary}</p>
                         <div className="brief-takeaways">
                           <div className="brief-takeaways-title ui-font">Key Takeaways</div>
-                          <ul>
+                          <ul className="list-diamond">
                             {topicSynthesis.takeaways.slice(0, 8).map((takeaway, tIdx) => (
                               <li key={`${brief.id}-tk-${tIdx}`}>{takeaway}</li>
                             ))}
@@ -716,9 +725,9 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
             {briefHistory.length > 0 && (
               <>
                 <div className="card brief-card interactive-brief-card">
-                  <div className="brief-card-head">
-                    <div className="brief-title-group">
-                      <h3>Synthesis Brief</h3>
+                  <div className="brief-card-head divider-soft">
+                    <div className="brief-title-group" style={{ marginBottom: '8px' }}>
+                      <h3 style={{ fontFamily: 'var(--font-serif)' }}>Synthesis Brief</h3>
                       {selectedBrief && <span className="brief-subtitle">{selectedBrief.date}</span>}
                     </div>
                   </div>
@@ -727,20 +736,20 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
                     <>
                       <div className="brief-hover-actions">
                         <button className="feedback-btn up" onClick={() => submitFeedback(selectedBrief.id, 1)} aria-label="Like brief">
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-                            <path d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017a2 2 0 01-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095a.905.905 0 00-.905.905c0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" />
+                          <svg viewBox="0 0 24 24" className="icon-line" aria-hidden>
+                            <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path>
                           </svg>
                         </button>
                         <button className="feedback-btn down" onClick={() => submitFeedback(selectedBrief.id, -1)} aria-label="Dislike brief">
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-                            <path d="M10 14H5.236a2 2 0 01-1.789-2.894l3.5-7A2 2 0 018.736 3h4.018c.163 0 .326.02.485.06L17 4m-7 10v5a2 2 0 002 2h.095c.5 0 .905-.405.905-.905 0-.714.211-1.412.608-2.006L17 13V4m-7 10h2" />
+                          <svg viewBox="0 0 24 24" className="icon-line" aria-hidden>
+                            <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3"></path>
                           </svg>
                         </button>
                         {feedback && <span className="brief-score mono">{feedback.upvotes - feedback.downvotes}</span>}
                       </div>
 
                       {synthesisEntry ? (
-                        <article className="brief-article">
+                        <article className="brief-article" style={{ borderLeft: 'none', paddingLeft: 0 }}>
                           <div className="brief-article-head ui-font">
                             <div className="brief-article-meta">
                               <span className="brief-chip">{synthesisEntry.topicTag || synthesisEntry.clusterLabel}</span>
@@ -749,11 +758,14 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
                             </div>
                             <span className="brief-article-count">{synthesisEntry.relatedArticles || selectedBrief.item_count} articles</span>
                           </div>
-                          <h5 className="brief-headline">{synthesisEntry.headline || synthesisEntry.clusterLabel}</h5>
+                          <h5 className="brief-headline" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <svg className="icon-line" style={{ width: '18px', height: '18px', color: '#d97706', opacity: 0.8 }} viewBox="0 0 24 24"><path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" /></svg>
+                            {synthesisEntry.headline || synthesisEntry.clusterLabel}
+                          </h5>
                           <p className="brief-summary">{synthesisEntry.summary}</p>
                           <div className="brief-takeaways">
                             <div className="brief-takeaways-title ui-font">Key Takeaways</div>
-                            <ul>
+                            <ul className="list-diamond">
                               {synthesisEntry.takeaways.slice(0, 12).map((takeaway, tIdx) => (
                                 <li key={`${selectedBrief.id}-synthesis-${tIdx}`}>{takeaway}</li>
                               ))}
@@ -768,7 +780,7 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
                         <pre className="brief-content">{selectedView?.fallbackText || 'No synthesized summary available yet.'}</pre>
                       )}
 
-                      <div className="keyword-row">
+                      <div className="keyword-row mt-6">
                         <strong className="ui-font">Keywords:</strong>{' '}
                         {activeTopicRecord.keywords.length ? activeTopicRecord.keywords.join(', ') : 'N/A'}
                       </div>
@@ -798,8 +810,8 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
                 </div>
 
                 <div className="articles-section">
-                  <div className="articles-header">
-                    <h3>Brief Cards</h3>
+                  <div className="articles-header divider-soft pb-2">
+                    <h3 style={{ fontFamily: 'var(--font-serif)' }}>Brief Cards</h3>
                     <div className="sort-control ui-font">
                       <span>{articlesLoading ? 'Loading...' : `${topicArticles.length} cards`}</span>
                     </div>
@@ -821,21 +833,22 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
                       {topicArticles.map((article) => {
                         const snippet = cleanArticleSnippet(article.content, article.title);
                         return (
-                          <article key={article.id} className="article-card news-article">
+                          <article key={article.id} className="article-card news-article" style={{ borderLeftWidth: '3px' }}>
                             <div className="article-source">{compactSourceName(article.source)}</div>
                             <h4 className="article-title">{article.title}</h4>
-                            <p className="article-content">
+                            <p className="article-content" style={{ fontFamily: 'var(--font-serif)' }}>
                               {snippet
                                 ? snippet.length > 230
                                   ? `${snippet.slice(0, 230)}...`
                                   : snippet
                                 : 'No excerpt available.'}
                             </p>
-                            <div className="article-footer">
+                            <div className="article-footer divider-soft border-t border-dashed pt-3 mt-4">
                               <span className="article-time">{formatArticleTime(article)} | {article.time_source || 'published_at'}</span>
                               <div className="article-actions">
-                                <a className="learn-more" href={article.url} target="_blank" rel="noreferrer">
+                                <a className="learn-more flex items-center font-semibold" href={article.url} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
                                   Learn More
+                                  <svg className="icon-line" style={{ width: '14px', height: '14px', marginLeft: '4px' }} viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
                                 </a>
                               </div>
                             </div>
@@ -862,7 +875,7 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
           </div>
 
           <aside className="brief-sidebar">
-            <h4>Recent Briefs (48h)</h4>
+            <h4 className="ui-font">Recent Briefs (48h)</h4>
             <div className="source-list brief-history-list">
               {briefHistory.map((brief) => {
                 const preview = extractBriefPreview(brief);
@@ -872,15 +885,18 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
                     className={`source-item brief-history-item ${brief.id === selectedBriefId ? 'active' : ''}`}
                     onClick={() => setSelectedBriefId(brief.id)}
                   >
-                    <div className="source-name">{preview.title}</div>
+                    <div className="source-name" style={{ fontFamily: 'var(--font-serif)' }}>{preview.title}</div>
                     <div className="source-sample">{preview.snippet}</div>
-                    <div className="source-meta">{brief.item_count} items | {formatBriefTimestamp(brief)}</div>
+                    <div className="source-meta ui-font">{brief.item_count} items | {formatBriefTimestamp(brief)}</div>
                   </button>
                 );
               })}
               {briefHistory.length === 0 && <div className="muted">No generated brief history yet.</div>}
             </div>
-            <button className="ghost source-registry-btn" onClick={onNavigateArchive}>View Brief Archive</button>
+            <button className="ghost source-registry-btn flex items-center justify-center gap-1" onClick={onNavigateArchive}>
+              View Brief Archive
+              <svg className="icon-line" style={{ width: '14px', height: '14px' }} viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+            </button>
           </aside>
         </div>
       )}
