@@ -149,6 +149,7 @@ class ArcBriefDB:
             """)
             self._run_migrations(conn)
             self._ensure_briefs_multi_version(conn)
+            self._ensure_articles_topic_unique(conn)  # v5: topic-scoped URL uniqueness
 
     # ---------- Migrations ----------
     _MIGRATIONS: List[tuple] = [
@@ -193,6 +194,22 @@ class ArcBriefDB:
                 return True
         return False
 
+    def _has_articles_topic_unique(self, conn: sqlite3.Connection) -> bool:
+        """True only when UNIQUE(topic_id, url) exists AND no single-col UNIQUE(url) remains."""
+        has_topic_url_unique = False
+        has_url_only_unique = False
+        for idx in conn.execute("PRAGMA index_list(articles)").fetchall():
+            # PRAGMA index_list columns: seq, name, unique, origin, partial
+            if int(idx[2]) != 1:  # not unique
+                continue
+            idx_name = idx[1]
+            cols = [r[2] for r in conn.execute(f"PRAGMA index_info('{idx_name}')").fetchall()]
+            if cols == ["topic_id", "url"]:
+                has_topic_url_unique = True
+            elif cols == ["url"]:
+                has_url_only_unique = True
+        return has_topic_url_unique and not has_url_only_unique
+
     def _ensure_briefs_multi_version(self, conn: sqlite3.Connection) -> None:
         marker = conn.execute("SELECT 1 FROM schema_migrations WHERE version = 3").fetchone()
         if marker:
@@ -221,6 +238,50 @@ class ArcBriefDB:
         conn.execute("ALTER TABLE briefs_new RENAME TO briefs")
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("INSERT INTO schema_migrations (version) VALUES (3)")
+
+    def _ensure_articles_topic_unique(self, conn: sqlite3.Connection) -> None:
+        """v5 migration: change articles UNIQUE(url) → UNIQUE(topic_id, url).
+        Atomic: runs as individual conn.execute() calls within the outer
+        with-conn transaction block; exception auto-rolls back everything."""
+        # Primary idempotency guard (mirrors _ensure_briefs_multi_version pattern)
+        marker = conn.execute("SELECT 1 FROM schema_migrations WHERE version = 5").fetchone()
+        if marker:
+            return
+
+        # Secondary guard: constraint already correct (e.g. manually fixed DB)
+        if self._has_articles_topic_unique(conn):
+            conn.execute("INSERT OR IGNORE INTO schema_migrations (version) VALUES (5)")
+            return
+
+        # Clean up any leftover from a previously-interrupted attempt
+        conn.execute("DROP TABLE IF EXISTS articles_new")
+
+        conn.execute("PRAGMA foreign_keys = OFF")
+        conn.execute("""
+            CREATE TABLE articles_new (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                topic_id     INTEGER NOT NULL,
+                title        TEXT    NOT NULL,
+                url          TEXT    NOT NULL,
+                content      TEXT,
+                source       TEXT,
+                published_at TEXT,
+                created_at   TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(topic_id) REFERENCES topics(id),
+                UNIQUE(topic_id, url)
+            )
+        """)
+        conn.execute("""
+            INSERT OR IGNORE INTO articles_new
+                (id, topic_id, title, url, content, source, published_at, created_at)
+            SELECT id, topic_id, title, url, content, source, published_at, created_at
+            FROM articles
+        """)
+        conn.execute("DROP TABLE articles")
+        conn.execute("ALTER TABLE articles_new RENAME TO articles")
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_articles_url ON articles(url)")
+        conn.execute("INSERT OR IGNORE INTO schema_migrations (version) VALUES (5)")
 
     # ---------- brief_runs logging ----------
     def log_brief_run(self, topic_id: int, run_type: str, status: str,
@@ -379,7 +440,7 @@ class ArcBriefDB:
                         """
                         INSERT INTO articles (topic_id, title, url, content, source, published_at)
                         VALUES (?, ?, ?, ?, ?, ?)
-                        ON CONFLICT(url) DO UPDATE SET
+                        ON CONFLICT(topic_id, url) DO UPDATE SET
                           title = CASE
                             WHEN TRIM(COALESCE(articles.title, '')) = '' AND TRIM(COALESCE(excluded.title, '')) != ''
                             THEN excluded.title ELSE articles.title

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime
 import json
+import math
+import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
@@ -125,6 +127,15 @@ _LANGUAGE_OUTPUT_HINTS: Dict[str, str] = {
     "English (US)": "Write in English (US).",
     "Chinese (Simplified)": "Write in Simplified Chinese.",
     "Japanese": "Write in Japanese.",
+}
+
+# Per-topic synthesis personas: injected into system prompt to focus the LLM's angle.
+_TOPIC_SYNTHESIS_PERSONAS: Dict[str, str] = {
+    "AI Daily": "Emphasize: model capability changes, product launches, and benchmark results.",
+    "AI Policy & Safety": "Emphasize: regulatory actions, legal precedents, and policy actors and their positions.",
+    "AI Builder Signals": "Emphasize: developer tooling changes, API updates, framework shifts, and workflow improvements.",
+    "Global Trending": "Emphasize: geopolitical cause-effect chains, key actor motivations, and timeline of events.",
+    "Macro and Metals": "Emphasize: price movements, central bank actions, macro indicators (CPI/yield/DXY), and market implications.",
 }
 
 _NOISY_SUMMARY_PATTERNS = [
@@ -346,6 +357,11 @@ def _build_dynamic_instruction(app_config: Optional[Dict[str, Any]], language: s
         )
     )
     instructions.append(_LANGUAGE_OUTPUT_HINTS.get(language, _LANGUAGE_OUTPUT_HINTS["English (US)"]))
+
+    topic_persona = cfg.get("topic_persona", "")
+    if topic_persona:
+        instructions.append(f"TOPIC FOCUS: {topic_persona}")
+
     return "\n".join(instructions)
 
 
@@ -608,6 +624,12 @@ def _generate_synthesis(
 
     dynamic_instruction = _build_dynamic_instruction(app_config, language)
 
+    # Build reliability map from cluster_briefs (index-aligned with cluster_evidence)
+    reliability_map: Dict[str, str] = {}
+    for i, cb in enumerate(cluster_briefs):
+        cid = f"C{i + 1}"
+        reliability_map[cid] = cb.get("reliability_score", "med")
+
     evidence_lines: List[str] = []
     valid_refs: set[str] = set()
     evidence_count = 0
@@ -616,7 +638,8 @@ def _generate_synthesis(
         label = cluster.get("label", "")
         snippets = cluster.get("snippets", [])
         if cluster_id and label:
-            evidence_lines.append(f"{cluster_id} [{label}]")
+            rel = reliability_map.get(cluster_id, "med")
+            evidence_lines.append(f"{cluster_id} [{label}] (reliability: {rel})")
         for snippet in snippets:
             ref = str(snippet.get("ref", "")).strip()
             title = str(snippet.get("title", "")).strip()
@@ -645,7 +668,8 @@ def _generate_synthesis(
         "4. key_takeaways must contain 6-10 concise bullets, each traceable to evidence.\n"
         "5. evidence_refs must include references from at least two different clusters when available.\n"
         "6. evidence_refs should cite at least 6 snippets when total evidence >= 12.\n"
-        "7. Do NOT introduce claims or entities that do not appear in [EVIDENCE SNIPPETS].\n\n"
+        "7. Do NOT introduce claims or entities that do not appear in [EVIDENCE SNIPPETS].\n"
+        "8. Clusters marked reliability=low contain unconfirmed claims — treat them with appropriate uncertainty and do not let them dominate the synthesis.\n\n"
         "[EXPECTED JSON SCHEMA]\n"
         "{\n"
         "  \"headline\": \"[Max 15 words]\",\n"
@@ -747,8 +771,13 @@ def _parse_timestamp(ts: str) -> Optional[datetime]:
         return None
 
 
+# Configurable freshness half-life: score = 0.5 when article age == halflife hours.
+# Set ARCBRIEF_RECENCY_HALFLIFE_HOURS to adjust freshness sensitivity (default: 12h).
+_RECENCY_HALFLIFE_HOURS: float = float(os.getenv("ARCBRIEF_RECENCY_HALFLIFE_HOURS", "12"))
+
+
 def _time_recency_score(ts: str) -> float:
-    """Return a 0..1 recency score, where newer timestamps score higher."""
+    """Return a 0..1 recency score using exponential decay (half-life = _RECENCY_HALFLIFE_HOURS)."""
     dt = _parse_timestamp(ts)
     if not dt:
         return 0.0
@@ -756,8 +785,8 @@ def _time_recency_score(ts: str) -> float:
     if dt.tzinfo is not None:
         dt = dt.astimezone(tz=None).replace(tzinfo=None)
     age_seconds = max((now - dt).total_seconds(), 0.0)
-    age_days = age_seconds / 86400.0
-    return 1.0 / (1.0 + age_days)
+    age_hours = age_seconds / 3600.0
+    return math.exp(-age_hours * math.log(2) / _RECENCY_HALFLIFE_HOURS)
 
 
 def _normalize_reputation(raw_score: float) -> float:
@@ -987,10 +1016,15 @@ def build_brief_for_topic(
     source_weights: Optional[Dict[str, float]] = None,
     app_config: Optional[Dict[str, Any]] = None,
 ) -> str:
-    cfg = app_config or {}
+    cfg = dict(app_config or {})
 
     if cfg.get("strict_academic_mode", False):
         items = _filter_social_media(items)
+
+    # Inject topic-specific synthesis persona based on topic name
+    persona = _TOPIC_SYNTHESIS_PERSONAS.get(topic.name, "")
+    if persona and "topic_persona" not in cfg:
+        cfg["topic_persona"] = persona
 
     watchlist_raw = cfg.get("entity_watchlist", "")
     watchlist = [w.strip() for w in watchlist_raw.split(",") if w.strip()] if watchlist_raw else []
@@ -1004,3 +1038,14 @@ def build_brief_for_topic(
         language=language,
         app_config=cfg,
     )
+
+
+def llm_chat(system_prompt: str, user_prompt: str) -> Optional[str]:
+    """One-shot LLM completion for use outside the briefing pipeline (e.g. /api/chat)."""
+    llm = _get_llm()
+    if llm is None:
+        return None
+    try:
+        return llm.invoke(system_prompt, user_prompt)
+    except Exception:
+        return None

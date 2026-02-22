@@ -53,7 +53,7 @@ class ArcBriefBot(discord.Client):
 bot = ArcBriefBot()
 
 
-@bot.tree.command(name="topics", description="List ArcBrief topics")
+@bot.tree.command(name="topics", description="List ArcBrief topics with status")
 async def list_topics(interaction: discord.Interaction):
     await interaction.response.defer(thinking=True)
     try:
@@ -61,7 +61,10 @@ async def list_topics(interaction: discord.Interaction):
         if not topics:
             await interaction.followup.send("No topics yet. Create one in the web UI.")
             return
-        lines = [f"- {t['id']}: {t['name']}" for t in topics]
+        lines = []
+        for t in topics:
+            status = "active" if t.get("is_active") else "paused"
+            lines.append(f"- [{status}] {t['id']} | {t['name']}")
         await interaction.followup.send("\n".join(lines))
     except Exception as e:
         await interaction.followup.send(f"Failed to load topics: {e}")
@@ -116,6 +119,61 @@ async def research(interaction: discord.Interaction, query: str):
 
     except Exception as e:
         await interaction.followup.send(f"Research failed: {e}")
+
+
+@bot.tree.command(name="ask", description="Ask a question about recent news briefs")
+@app_commands.describe(
+    question="Your question (e.g. 'What happened with OpenAI this week?')",
+    topic="Optional topic filter: 'ai', 'policy', 'global', 'macro'",
+)
+async def ask(interaction: discord.Interaction, question: str, topic: Optional[str] = None):
+    await interaction.response.defer(thinking=True)
+    topic_id = None
+    if topic:
+        try:
+            topics = await api_get("/topics")
+            matches = [t for t in topics if topic.lower() in t["name"].lower()]
+            if matches:
+                topic_id = matches[0]["id"]
+        except Exception:
+            pass  # topic filter is optional; proceed without it
+
+    try:
+        result = await api_post("/chat", {"message": question, "topic_id": topic_id})
+        reply = result.get("reply", "No relevant information found.")
+        sources = result.get("sources", [])
+        response = reply
+        if sources:
+            response += f"\n\n*Sources: {', '.join(sources)}*"
+    except Exception as e:
+        response = f"Error fetching answer: {e}"
+
+    for chunk in chunk_text(response):
+        await interaction.followup.send(chunk)
+
+
+@bot.tree.command(name="digest", description="Get the latest brief summary for each active topic")
+async def digest(interaction: discord.Interaction):
+    await interaction.response.defer(thinking=True)
+    try:
+        data = await api_get("/briefs/recent?limit=40")
+        items = data.get("items", [])
+        # One per topic — list is ordered by created_at DESC, first occurrence = latest
+        seen: Dict[int, Any] = {}
+        for b in items:
+            tid = b.get("topic_id")
+            if tid is not None and tid not in seen:
+                seen[tid] = b
+        if not seen:
+            await interaction.followup.send("No briefs available yet.")
+            return
+        lines = [
+            f"**{b['topic_name']}** ({b.get('date', 'N/A')})"
+            for b in seen.values()
+        ]
+        await interaction.followup.send("\n".join(lines))
+    except Exception as e:
+        await interaction.followup.send(f"Error: {e}")
 
 
 def main():

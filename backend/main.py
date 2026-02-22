@@ -20,7 +20,7 @@ from foreign_query_agent.utils import slugify
 from .state import RUNS, RunEvent, RunRecord
 from .db import ArcBriefDB
 from .collection import Collector, collect_for_topic
-from .briefing import build_brief_for_topic
+from .briefing import build_brief_for_topic, llm_chat
 from .pdf_export import render_pdf
 from .scheduler import ArcBriefScheduler
 
@@ -1199,6 +1199,61 @@ def update_topic(topic_id: int, payload: TopicUpdateRequest):
         SCHEDULER.refresh_jobs()
 
     return {"status": "updated", "topic_id": topic_id}
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=500)
+    topic_id: Optional[int] = None
+    days: int = Field(default=7, ge=1, le=30)
+
+
+@app.post("/api/chat")
+def chat_with_briefs(req: ChatRequest):
+    """Answer a user question based on recent brief content (no RAG/vector store needed)."""
+    if DB is None:
+        raise HTTPException(status_code=500, detail="DB not initialized")
+
+    from datetime import timedelta
+    cutoff = (datetime.utcnow() - timedelta(days=req.days)).isoformat()
+
+    # Fetch recent briefs (topic-filtered or global)
+    all_briefs = DB.list_recent_briefs(limit=20, topic_id=req.topic_id)
+    briefs = [b for b in all_briefs if (b.get("created_at") or "") >= cutoff]
+
+    if not briefs:
+        return {"reply": "No recent briefs found for this query.", "sources": []}
+
+    # Build context: up to 5 briefs, 1500 chars each, total cap 6000 chars
+    blocks: List[str] = []
+    total_chars = 0
+    for b in briefs[:5]:
+        content = (b.get("content") or "")[:1500]
+        if total_chars + len(content) > 6000:
+            break
+        date_label = b.get("date") or b.get("created_at", "")[:10]
+        topic_label = b.get("topic_name", f"Topic {b.get('topic_id', '')}")
+        blocks.append(f"[{date_label} | {topic_label}]\n{content}")
+        total_chars += len(content)
+
+    context = "\n\n---\n\n".join(blocks)
+    sources = [
+        f"{b.get('date') or (b.get('created_at', '')[:10])} | {b.get('topic_name', '')}"
+        for b in briefs[: len(blocks)]
+    ]
+
+    system_prompt = (
+        "You are a concise news analyst assistant. Answer the user's question based ONLY on "
+        "the provided brief context. Respond in 2-4 sentences in a conversational (not report) tone. "
+        "If the context does not cover the question, say so clearly. "
+        "Cite the brief date and topic you draw from."
+    )
+    user_prompt = f"Context:\n{context}\n\nQuestion: {req.message}"
+
+    reply = llm_chat(system_prompt, user_prompt)
+    if reply is None:
+        reply = "LLM is unavailable. Please try again later."
+
+    return {"reply": reply, "sources": sources}
 
 
 @app.delete("/api/topics/{topic_id}")
