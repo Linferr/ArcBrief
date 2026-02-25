@@ -237,6 +237,7 @@ const parseBriefView = (content: string): ParsedBriefView => {
 };
 
 export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateArchive }: Props) {
+  const allowAdminActions = process.env.NEXT_PUBLIC_ARCBRIEF_ENABLE_ADMIN_ACTIONS !== '0';
   const [activeTopic, setActiveTopic] = useState<ActiveTopicKey>('all');
   const [briefHistory, setBriefHistory] = useState<Brief[]>([]);
   const [allTopicBriefs, setAllTopicBriefs] = useState<RecentBrief[]>([]);
@@ -262,7 +263,7 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
 
   const loadBriefHistory = async (topicId: number, preferredBriefId: number | null = null) => {
     try {
-      const res = await apiFetch(`/briefs/${topicId}/history?limit=14`);
+      const res = await apiFetch(`/briefs/${topicId}/history?limit=30&since_hours=48`);
       if (res.ok) {
         const data = (await res.json()) as Brief[];
         setBriefHistory(data);
@@ -385,10 +386,14 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
   );
 
   useEffect(() => {
+    if (!allowAdminActions) {
+      setFeedback(null);
+      return;
+    }
     const brief = selectedBrief;
     if (brief) loadFeedback(brief.id);
     else setFeedback(null);
-  }, [selectedBrief]);
+  }, [selectedBrief, allowAdminActions]);
 
   useEffect(() => {
     if (!selectedBrief) {
@@ -413,6 +418,7 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
   };
 
   const submitFeedback = async (briefId: number, rating: number) => {
+    if (!allowAdminActions) return;
     try {
       const res = await apiFetch(`/briefs/${briefId}/feedback?rating=${rating}`, { method: 'POST' });
       if (res.ok) setFeedback(await res.json());
@@ -430,6 +436,10 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
   };
 
   const refreshAndGenerateAll = async () => {
+    if (!allowAdminActions) {
+      setNotice('Admin actions are disabled in public demo mode.');
+      return;
+    }
     setRefreshPhase('collecting');
     setRefreshStats(null);
     setNotice('');
@@ -570,21 +580,23 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
           );
         })}
 
-      <button 
-        className="ghost group" 
-        style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '32px', padding: '0 12px', marginLeft: 'auto' }} 
-        onClick={refreshAndGenerateAll} 
-        disabled={isRefreshing}
-      >
-        <svg className="icon-line group-hover:stroke-[var(--text-primary)] transition-colors" style={{ width: '14px', height: '14px' }} viewBox="0 0 24 24" aria-hidden>
-          <path d="M21 12a9 9 0 11-2.5-7.5" />
-          <path d="M21 4.5v7.5h-7.5" />
-          <path d="M17 9l-3-3m0 0l-3 3m3-3v8" opacity="0.5" strokeWidth="1"/> 
-        </svg>
-        <span style={{ fontSize: '12px', fontWeight: 500 }}>
-          {isRefreshing ? (refreshPhase === 'collecting' ? 'Collecting...' : 'Generating...') : 'Refresh Brief'}
-        </span>
-      </button>
+      {allowAdminActions && (
+        <button 
+          className="ghost group" 
+          style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '32px', padding: '0 12px', marginLeft: 'auto' }} 
+          onClick={refreshAndGenerateAll} 
+          disabled={isRefreshing}
+        >
+          <svg className="icon-line group-hover:stroke-[var(--text-primary)] transition-colors" style={{ width: '14px', height: '14px' }} viewBox="0 0 24 24" aria-hidden>
+            <path d="M21 12a9 9 0 11-2.5-7.5" />
+            <path d="M21 4.5v7.5h-7.5" />
+            <path d="M17 9l-3-3m0 0l-3 3m3-3v8" opacity="0.5" strokeWidth="1"/> 
+          </svg>
+          <span style={{ fontSize: '12px', fontWeight: 500 }}>
+            {isRefreshing ? (refreshPhase === 'collecting' ? 'Collecting...' : 'Generating...') : 'Refresh Brief'}
+          </span>
+        </button>
+      )}
 
         {activeTopics.length === 0 && (
           <div className="card" style={{ textAlign: 'center', padding: '2rem', width: '100%' }}>
@@ -734,19 +746,21 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
 
                   {selectedBrief && (
                     <>
-                      <div className="brief-hover-actions">
-                        <button className="feedback-btn up" onClick={() => submitFeedback(selectedBrief.id, 1)} aria-label="Like brief">
-                          <svg viewBox="0 0 24 24" className="icon-line" aria-hidden>
-                            <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path>
-                          </svg>
-                        </button>
-                        <button className="feedback-btn down" onClick={() => submitFeedback(selectedBrief.id, -1)} aria-label="Dislike brief">
-                          <svg viewBox="0 0 24 24" className="icon-line" aria-hidden>
-                            <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3"></path>
-                          </svg>
-                        </button>
-                        {feedback && <span className="brief-score mono">{feedback.upvotes - feedback.downvotes}</span>}
-                      </div>
+                      {allowAdminActions && (
+                        <div className="brief-hover-actions">
+                          <button className="feedback-btn up" onClick={() => submitFeedback(selectedBrief.id, 1)} aria-label="Like brief">
+                            <svg viewBox="0 0 24 24" className="icon-line" aria-hidden>
+                              <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path>
+                            </svg>
+                          </button>
+                          <button className="feedback-btn down" onClick={() => submitFeedback(selectedBrief.id, -1)} aria-label="Dislike brief">
+                            <svg viewBox="0 0 24 24" className="icon-line" aria-hidden>
+                              <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3"></path>
+                            </svg>
+                          </button>
+                          {feedback && <span className="brief-score mono">{feedback.upvotes - feedback.downvotes}</span>}
+                        </div>
+                      )}
 
                       {synthesisEntry ? (
                         <article className="brief-article" style={{ borderLeft: 'none', paddingLeft: 0 }}>

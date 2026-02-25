@@ -31,10 +31,10 @@ class CollectedItem:
 
 class Collector:
     def __init__(self, tavily_api_key: str | None = None) -> None:
-        self.tavily_enabled = os.getenv("ARCBRIEF_ENABLE_TAVILY", "1") == "1"
         self.tavily_api_key = tavily_api_key or os.getenv("TAVILY_API_KEY", "")
+        self.tavily_enabled = bool(self.tavily_api_key and TavilyClient is not None)
         self.tavily_client = None
-        if self.tavily_enabled and self.tavily_api_key and TavilyClient is not None:
+        if self.tavily_enabled:
             try:
                 self.tavily_client = TavilyClient(api_key=self.tavily_api_key)
             except Exception:

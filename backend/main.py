@@ -1,11 +1,15 @@
 ﻿"""FastAPI backend for ArcBrief."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
+import hmac
 from hashlib import sha256
+import ipaddress
 import logging
 import os
+import re
 import threading
-from typing import Dict, List, Optional
+import time
+from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,63 +19,98 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger(__name__)
 
 from foreign_query_agent import QueryAgent, Settings
+from foreign_query_agent.tools.factory import ProviderUnavailableError, create_search_tool_with_meta
 from foreign_query_agent.utils import slugify
 
 from .state import RUNS, RunEvent, RunRecord
+from .constants import APP_CONFIG_DEFAULTS
 from .db import ArcBriefDB
 from .collection import Collector, collect_for_topic
 from .briefing import build_brief_for_topic, llm_chat
 from .pdf_export import render_pdf
+from .rate_limit import RateLimiter
 from .scheduler import ArcBriefScheduler
 
 
 app = FastAPI(title="ArcBrief API")
 
-APP_CONFIG_DEFAULTS = {
-    "strict_academic_mode": True,
-    "critical_analysis_layer": True,
-    "cognitive_model": "Neutral (Fact-first)",
-    "report_language": "English (US)",
-    "primary_model": "Qwen3 MAX",
-    "search_provider": "Tavily Search API",
-    "entity_watchlist": "",
-}
-
-# ---------- Rate limiter (in-memory, per-key) ----------
-_rate_buckets: Dict[str, List[float]] = {}
-_rate_lock = threading.Lock()
-RATE_LIMIT = int(os.getenv("RATE_LIMIT_PER_MIN", "60"))
+# ---------- Rate limits ----------
+ADMIN_RATE_LIMIT = int(os.getenv("RATE_LIMIT_PER_MIN", "60"))
+PUBLIC_RATE_LIMIT = int(os.getenv("ARCBRIEF_PUBLIC_RATE_LIMIT_PER_MIN", "15"))
+PUBLIC_READ_RATE_LIMIT = int(os.getenv("ARCBRIEF_PUBLIC_READ_RATE_LIMIT_PER_MIN", "60"))
+PUBLIC_EXPORT_RATE_LIMIT = int(os.getenv("ARCBRIEF_PUBLIC_EXPORT_RATE_LIMIT_PER_MIN", "10"))
+RUN_ROUTE_LIMIT = int(os.getenv("ARCBRIEF_ROUTE_LIMIT_RUN_PER_MIN", "4"))
+CHAT_ROUTE_LIMIT = int(os.getenv("ARCBRIEF_ROUTE_LIMIT_CHAT_PER_MIN", "8"))
+ADMIN_ROUTE_LIMIT_MULTIPLIER = int(os.getenv("ARCBRIEF_ADMIN_ROUTE_LIMIT_MULTIPLIER", "10"))
+RATE_LIMIT_STORAGE_URI = os.getenv("ARCBRIEF_RATE_LIMIT_STORAGE_URI", "")
 MAX_CONCURRENT_RESEARCH = int(os.getenv("MAX_CONCURRENT_RESEARCH", "3"))
+MAX_CONCURRENT_CHAT = int(os.getenv("MAX_CONCURRENT_CHAT", "10"))
 MAX_REFLECTIONS = int(os.getenv("FQ_MAX_REFLECTIONS", "3"))
+RUNS_TTL_HOURS = int(os.getenv("ARCBRIEF_RUNS_TTL_HOURS", "24"))
+RUNS_MAX_RECORDS = int(os.getenv("ARCBRIEF_RUNS_MAX_RECORDS", "500"))
+SIGNED_IP_WINDOW_SECONDS = int(os.getenv("ARCBRIEF_PROXY_SIGNED_IP_MAX_AGE_SECONDS", "60"))
+PROXY_SIGNING_SECRET = (os.getenv("ARCBRIEF_PROXY_SIGNING_SECRET", "") or "").strip()
+_RATE_LIMITER = RateLimiter(RATE_LIMIT_STORAGE_URI)
 _active_research = 0
 _research_lock = threading.Lock()
+_active_chat = 0
+_chat_lock = threading.Lock()
 _collecting_topics: Dict[int, bool] = {}
 _collect_lock = threading.Lock()
+_LAST_SEARCH_DIAGNOSTICS: Dict[str, Any] = {
+    "search_provider_configured": APP_CONFIG_DEFAULTS.get("search_provider", "Tavily Search API"),
+    "search_provider_effective": APP_CONFIG_DEFAULTS.get("search_provider", "Tavily Search API"),
+    "search_provider_fallback": "",
+    "search_llm_assisted": False,
+}
+
+_PUBLIC_READ_PATTERNS = (
+    re.compile(r"^/api/health$"),
+    re.compile(r"^/api/topics$"),
+    re.compile(r"^/api/briefs/recent$"),
+)
+_PUBLIC_EXPORT_PATTERNS = (
+    re.compile(r"^/api/briefs/\d+/export$"),
+    re.compile(r"^/api/briefs/\d+/export/pdf$"),
+)
+_GUEST_POST_PATHS = frozenset({"/api/run", "/api/chat"})
+_SUPPORTED_LANGUAGES = frozenset({"English (US)", "Chinese (Simplified)", "Japanese"})
 
 
-def _check_rate_limit(key: str) -> bool:
-    now = datetime.utcnow().timestamp()
-    window = now - 60
-    with _rate_lock:
-        bucket = _rate_buckets.setdefault(key, [])
-        _rate_buckets[key] = [t for t in bucket if t > window]
-        if len(_rate_buckets[key]) >= RATE_LIMIT:
-            return False
-        _rate_buckets[key].append(now)
-        return True
+def _check_rate_limit(bucket_key: str, limit: int) -> bool:
+    return _RATE_LIMITER.allow(bucket_key, max(1, limit), window_seconds=60)
 
-# CORS配置 - 白名单限制
+
+def _check_route_rate_limit(route: str, identity: str, limit: int) -> bool:
+    return _check_rate_limit(f"route:{route}:{identity}", limit)
+
+
+def _public_rate_limit_for_path(path: str) -> Optional[tuple[str, int]]:
+    if any(pattern.match(path) for pattern in _PUBLIC_EXPORT_PATTERNS):
+        return ("export", PUBLIC_EXPORT_RATE_LIMIT)
+    if any(pattern.match(path) for pattern in _PUBLIC_READ_PATTERNS):
+        return ("read", PUBLIC_READ_RATE_LIMIT)
+    return None
+
+# CORS - whitelist origins
 app.add_middleware(
     CORSMiddleware,
     allow_origins=os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(","),
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "X-API-Key"],
+    allow_headers=[
+        "Content-Type",
+        "X-API-Key",
+        "X-Arcbrief-Client-Ip",
+        "X-Arcbrief-Client-Ts",
+        "X-Arcbrief-Client-Sig",
+    ],
 )
 
 DB: ArcBriefDB | None = None
 SCHEDULER: ArcBriefScheduler | None = None
 DEFAULT_LOCAL_API_KEY = "arcbrief-local-dev-key"
+DEFAULT_PUBLIC_API_KEY = "arcbrief-public-demo-key"
 _STARTUP_TIME: Optional[str] = None
 DISABLE_AUTH = os.getenv("ARCBRIEF_DISABLE_AUTH", "0") == "1"
 
@@ -289,12 +328,91 @@ def _backfill_legacy_default_topics(db: ArcBriefDB, defaults: List[Dict]) -> int
     return updated
 
 
-def _expected_api_key() -> str:
+def _expected_admin_api_key() -> str:
     raw = os.getenv("ARCBRIEF_API_KEY", "").strip()
     # Treat placeholder or empty values as "not configured" to avoid local mismatch.
     if raw in {"", "replace-with-your-key", "your_key", "changeme"}:
         return DEFAULT_LOCAL_API_KEY
     return raw or DEFAULT_LOCAL_API_KEY
+
+
+def _expected_public_api_key() -> str:
+    raw = os.getenv("ARCBRIEF_PUBLIC_API_KEY", "").strip()
+    if raw in {"", "replace-with-your-key", "your_public_key", "changeme"}:
+        return DEFAULT_PUBLIC_API_KEY
+    return raw or DEFAULT_PUBLIC_API_KEY
+
+
+def _normalize_language(language: Optional[str]) -> str:
+    candidate = (language or "").strip()
+    if candidate in _SUPPORTED_LANGUAGES:
+        return candidate
+    return "English (US)"
+
+
+def _is_valid_ip(value: str) -> bool:
+    try:
+        ipaddress.ip_address(value)
+        return True
+    except ValueError:
+        return False
+
+
+def _signed_client_ip(request: Request) -> Optional[str]:
+    if not PROXY_SIGNING_SECRET:
+        return None
+    ip = (request.headers.get("X-Arcbrief-Client-Ip") or "").strip()
+    ts_raw = (request.headers.get("X-Arcbrief-Client-Ts") or "").strip()
+    sig = (request.headers.get("X-Arcbrief-Client-Sig") or "").strip().lower()
+    if not ip or not ts_raw or not sig or not _is_valid_ip(ip):
+        return None
+    try:
+        ts_val = int(ts_raw)
+    except ValueError:
+        return None
+    now = int(time.time())
+    if abs(now - ts_val) > max(1, SIGNED_IP_WINDOW_SECONDS):
+        return None
+    expected = hmac.new(
+        PROXY_SIGNING_SECRET.encode("utf-8"),
+        f"{ip}.{ts_raw}".encode("utf-8"),
+        sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(expected, sig):
+        return None
+    return ip
+
+
+def _client_ip(request: Request) -> str:
+    trusted = _signed_client_ip(request)
+    if trusted:
+        return trusted
+    if request.client and request.client.host and _is_valid_ip(request.client.host):
+        return request.client.host
+    return "unknown"
+
+
+def _client_fingerprint(request: Request) -> str:
+    return sha256(_client_ip(request).encode("utf-8")).hexdigest()
+
+
+def _is_public_read_endpoint(request: Request) -> bool:
+    if request.method != "GET":
+        return False
+    path = request.url.path
+    return _public_rate_limit_for_path(path) is not None
+
+
+def _route_limit_for(path: str, role: str) -> Optional[int]:
+    if path == "/api/run":
+        base = RUN_ROUTE_LIMIT
+    elif path == "/api/chat":
+        base = CHAT_ROUTE_LIMIT
+    else:
+        return None
+    if role == "admin":
+        return max(base * max(1, ADMIN_ROUTE_LIMIT_MULTIPLIER), base)
+    return base
 
 
 @app.middleware("http")
@@ -303,28 +421,73 @@ async def api_key_guard(request: Request, call_next):
         return await call_next(request)
     if DISABLE_AUTH:
         return await call_next(request)
-    # Localhost dev bypass
-    client_host = request.client.host if request.client else ""
-    if client_host in {"127.0.0.1", "::1"}:
+    path = request.url.path
+    identity = _client_fingerprint(request)
+    if _is_public_read_endpoint(request):
+        public_limit = _public_rate_limit_for_path(path)
+        if public_limit:
+            bucket_name, bucket_limit = public_limit
+            if not _check_rate_limit(f"public:{bucket_name}:{identity}", bucket_limit):
+                return JSONResponse(
+                    status_code=429,
+                    content={
+                        "error_code": "RATE_LIMITED_PUBLIC",
+                        "message": f"Public rate limit exceeded ({bucket_limit} req/min)",
+                    },
+                )
         return await call_next(request)
-    # Health endpoint bypasses auth
-    if request.url.path == "/api/health":
-        return await call_next(request)
+
     provided = (request.headers.get("X-API-Key") or "").strip()
-    if provided != _expected_api_key():
-        return JSONResponse(status_code=401, content={"error_code": "UNAUTHORIZED", "message": "Invalid or missing API key"})
-    if not _check_rate_limit(provided):
-        return JSONResponse(status_code=429, content={"error_code": "RATE_LIMITED", "message": f"Rate limit exceeded ({RATE_LIMIT} req/min)"})
+    admin_key = _expected_admin_api_key()
+    public_key = _expected_public_api_key()
+
+    role: Optional[str] = None
+    if provided == admin_key:
+        role = "admin"
+    elif path in _GUEST_POST_PATHS and provided == public_key:
+        role = "guest"
+
+    if role is None:
+        return JSONResponse(
+            status_code=401,
+            content={"error_code": "UNAUTHORIZED", "message": "Invalid or missing API key"},
+        )
+
+    if path not in _GUEST_POST_PATHS and role != "admin":
+        return JSONResponse(
+            status_code=403,
+            content={"error_code": "FORBIDDEN", "message": "This endpoint requires admin privileges"},
+        )
+
+    per_key_limit = ADMIN_RATE_LIMIT if role == "admin" else PUBLIC_RATE_LIMIT
+    key_hash = sha256(provided.encode("utf-8")).hexdigest()
+    if not _check_rate_limit(f"global:{role}:{key_hash}", per_key_limit):
+        return JSONResponse(
+            status_code=429,
+            content={"error_code": "RATE_LIMITED", "message": f"Rate limit exceeded ({per_key_limit} req/min)"},
+        )
+
+    route_limit = _route_limit_for(path, role)
+    if route_limit is not None and not _check_route_rate_limit(path, identity, route_limit):
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error_code": "ROUTE_RATE_LIMITED",
+                "message": f"Route rate limit exceeded for {path} ({route_limit} req/min)",
+            },
+        )
     return await call_next(request)
 
 
 class RunRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=500)
+    language: Optional[str] = Field(default=None, max_length=64)
 
 
 class RunResponse(BaseModel):
     run_id: str
     status: str
+    language_used: str
 
 
 class StatusResponse(BaseModel):
@@ -333,6 +496,7 @@ class StatusResponse(BaseModel):
     events: List[RunEvent]
     report_path: Optional[str] = None
     report_content: Optional[str] = None
+    language_used: Optional[str] = None
 
 
 class TopicCreateRequest(BaseModel):
@@ -372,12 +536,17 @@ class AppConfigUpdateRequest(BaseModel):
     report_language: Optional[str] = None
     primary_model: Optional[str] = None
     search_provider: Optional[str] = None
+    brief_generation_framework: Optional[str] = None
+    research_recency_mode: Optional[str] = None
     entity_watchlist: Optional[str] = None
+
+
+class BriefGenerateRequest(BaseModel):
+    language: Optional[str] = Field(default=None, max_length=64)
 
 
 def _sanitize_query(query: str) -> str:
     """Strip common prompt injection patterns from user query."""
-    import re
     sanitized = query
     # Remove common injection delimiters
     for pattern in [
@@ -413,13 +582,34 @@ def _parse_ts_for_sort(value: Optional[str]) -> datetime:
         return datetime.min
 
 
+def _estimate_source_count(report_content: Optional[str]) -> int:
+    if not report_content:
+        return 0
+
+    lines = report_content.splitlines()
+    in_sources = False
+    source_lines: List[str] = []
+    for raw in lines:
+        line = raw.strip()
+        if not line:
+            continue
+        if re.match(r"^#{1,6}\s*sources?\b", line, flags=re.IGNORECASE):
+            in_sources = True
+            continue
+        if in_sources and line.startswith("#"):
+            break
+        if in_sources and re.match(r"^(-|\*|\d+\.)\s+", line):
+            source_lines.append(re.sub(r"^(-|\*|\d+\.)\s+", "", line).strip().lower())
+
+    if source_lines:
+        return len({s for s in source_lines if s})
+
+    urls = re.findall(r"https?://[^\s)>\"]+", report_content)
+    return len(set(urls))
+
+
 def _get_voter_key(request: Request) -> str:
-    forwarded = request.headers.get("X-Forwarded-For", "")
-    ip = forwarded.split(",")[0].strip() if forwarded else ""
-    if not ip and request.client:
-        ip = request.client.host or ""
-    raw = ip or "unknown"
-    return sha256(raw.encode("utf-8")).hexdigest()
+    return sha256(_client_ip(request).encode("utf-8")).hexdigest()
 
 
 _MODEL_MAP = {
@@ -454,14 +644,53 @@ def _build_model_candidates(primary: str) -> List[str]:
     return candidates
 
 
-def _run_job(run_id: str, query: str) -> None:
+def _parse_iso(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if dt.tzinfo:
+            dt = dt.astimezone(tz=None).replace(tzinfo=None)
+        return dt
+    except Exception:
+        return None
+
+
+def _cleanup_inmemory_runs() -> int:
+    cutoff = datetime.utcnow() - timedelta(hours=max(1, RUNS_TTL_HOURS))
+    to_remove: set[str] = set()
+
+    for run_id, record in list(RUNS.items()):
+        finished_dt = _parse_iso(record.finished_at)
+        started_dt = _parse_iso(record.started_at)
+        anchor = finished_dt or started_dt
+        if anchor and anchor < cutoff:
+            to_remove.add(run_id)
+
+    if len(RUNS) - len(to_remove) > RUNS_MAX_RECORDS:
+        remaining = [(rid, rec) for rid, rec in RUNS.items() if rid not in to_remove]
+        remaining.sort(
+            key=lambda pair: _parse_iso(pair[1].finished_at) or _parse_iso(pair[1].started_at) or datetime.min
+        )
+        overflow = max(0, len(remaining) - RUNS_MAX_RECORDS)
+        to_remove.update(rid for rid, _ in remaining[:overflow])
+
+    for run_id in to_remove:
+        RUNS.pop(run_id, None)
+
+    return len(to_remove)
+
+
+def _run_job(run_id: str, query: str, language: str) -> None:
     record = RUNS[run_id]
     record.status = "running"
     record.started_at = datetime.utcnow().isoformat()
+    record.language_used = _normalize_language(language)
 
     try:
         settings = Settings(output_dir="outputs")
         selected_model = settings.llm_model
+        configured_search_provider = settings.search_provider
 
         # Apply app_config overrides
         if DB is not None:
@@ -469,6 +698,11 @@ def _run_job(run_id: str, query: str) -> None:
                 config = DB.get_app_config()
                 merged = {**APP_CONFIG_DEFAULTS, **config}
                 model_label = merged.get("primary_model", "")
+                settings.search_provider = str(merged.get("search_provider") or settings.search_provider)
+                settings.research_recency_mode = str(
+                    merged.get("research_recency_mode") or settings.research_recency_mode
+                )
+                configured_search_provider = settings.search_provider
                 if model_label in _MODEL_MAP:
                     selected_model = _MODEL_MAP[model_label]
                 if not merged.get("critical_analysis_layer", True):
@@ -483,14 +717,72 @@ def _run_job(run_id: str, query: str) -> None:
 
         for idx, candidate_model in enumerate(model_candidates):
             settings.llm_model = candidate_model
-            agent = QueryAgent(settings)
+            try:
+                agent = QueryAgent(settings)
+            except ProviderUnavailableError as provider_err:
+                meta = provider_err.meta
+                record.events.append(
+                    RunEvent(
+                        stage="search_provider",
+                        message=(
+                            f"configured={meta.provider_requested} "
+                            f"effective={meta.provider_effective} "
+                            f"llm_assisted={str(meta.llm_assisted_search).lower()}"
+                        ),
+                    )
+                )
+                unavailable_reason = meta.fallback_reason or str(provider_err)
+                record.events.append(RunEvent(stage="error", message=f"PROVIDER_UNAVAILABLE: {unavailable_reason}"))
+                _LAST_SEARCH_DIAGNOSTICS.update(
+                    {
+                        "search_provider_configured": meta.provider_requested,
+                        "search_provider_effective": meta.provider_effective,
+                        "search_provider_fallback": unavailable_reason,
+                        "search_llm_assisted": bool(meta.llm_assisted_search),
+                    }
+                )
+                raise RuntimeError(f"PROVIDER_UNAVAILABLE: {unavailable_reason}") from provider_err
+            meta = getattr(agent, "search_meta", None)
+
+            if meta is not None:
+                record.events.append(
+                    RunEvent(
+                        stage="search_provider",
+                        message=(
+                            f"configured={meta.provider_requested} "
+                            f"effective={meta.provider_effective} "
+                            f"llm_assisted={str(meta.llm_assisted_search).lower()}"
+                        ),
+                    )
+                )
+                _LAST_SEARCH_DIAGNOSTICS.update(
+                    {
+                        "search_provider_configured": meta.provider_requested,
+                        "search_provider_effective": meta.provider_effective,
+                        "search_provider_fallback": meta.fallback_reason,
+                        "search_llm_assisted": bool(meta.llm_assisted_search),
+                    }
+                )
+            else:
+                _LAST_SEARCH_DIAGNOSTICS.update(
+                    {
+                        "search_provider_configured": configured_search_provider,
+                        "search_provider_effective": configured_search_provider,
+                        "search_provider_fallback": "",
+                        "search_llm_assisted": False,
+                    }
+                )
 
             def progress_cb(evt):
                 record.events.append(RunEvent(**evt))
 
             safe_query = _sanitize_query(query)
             try:
-                report = agent.research(safe_query, progress_cb=progress_cb)
+                report = agent.research(
+                    safe_query,
+                    progress_cb=progress_cb,
+                    language=record.language_used,
+                )
                 path = agent.save_report(report, settings.output_dir)
                 if idx > 0:
                     record.events.append(
@@ -536,6 +828,7 @@ def _run_job(run_id: str, query: str) -> None:
                     run_id=record.run_id,
                     query=record.query,
                     status=record.status,
+                    language_used=record.language_used,
                     report_path=record.report_path,
                     report_content=record.report_content,
                     started_at=record.started_at,
@@ -604,6 +897,13 @@ def _startup() -> None:
         discord_webhook=discord_webhook
     )
     SCHEDULER.start()
+    SCHEDULER.scheduler.add_job(
+        _cleanup_inmemory_runs,
+        trigger="interval",
+        minutes=30,
+        id="cleanup_inmemory_runs",
+        replace_existing=True,
+    )
 
 
 @app.on_event("shutdown")
@@ -628,21 +928,80 @@ def system_status():
                 "trigger": str(job.trigger),
             })
     effective_max_reflections = MAX_REFLECTIONS
+    merged = dict(APP_CONFIG_DEFAULTS)
     if DB is not None:
         try:
             config = DB.get_app_config()
             merged = {**APP_CONFIG_DEFAULTS, **config}
             if not merged.get("critical_analysis_layer", True):
                 effective_max_reflections = 1
+            _LAST_SEARCH_DIAGNOSTICS["search_provider_configured"] = str(
+                merged.get("search_provider", _LAST_SEARCH_DIAGNOSTICS.get("search_provider_configured", "Tavily Search API"))
+            )
         except Exception:
             pass
+    configured_provider = str(merged.get("search_provider", "Tavily Search API"))
+    try:
+        settings_probe = Settings(output_dir="outputs")
+        _tool, meta = create_search_tool_with_meta(
+            configured_provider,
+            fallback_tavily_key=settings_probe.tavily_api_key,
+            bocha_api_key=settings_probe.bocha_api_key,
+            zhipu_api_key=settings_probe.zhipu_api_key,
+            zhipu_openai_base_url=settings_probe.zhipu_openai_base_url,
+            zhipu_web_search_model=settings_probe.zhipu_web_search_model,
+            exa_api_key=settings_probe.exa_api_key,
+            volcengine_api_key=settings_probe.volcengine_api_key,
+            volcengine_openai_base_url=settings_probe.volcengine_openai_base_url,
+            volcengine_model_ep=settings_probe.volcengine_model_ep,
+            strict=settings_probe.research_strict_provider,
+        )
+        _LAST_SEARCH_DIAGNOSTICS.update(
+            {
+                "search_provider_configured": configured_provider,
+                "search_provider_effective": meta.provider_effective,
+                "search_provider_fallback": meta.fallback_reason,
+                "search_llm_assisted": bool(meta.llm_assisted_search),
+            }
+        )
+    except ProviderUnavailableError as probe_unavailable:
+        probe_meta = probe_unavailable.meta
+        _LAST_SEARCH_DIAGNOSTICS.update(
+            {
+                "search_provider_configured": configured_provider,
+                "search_provider_effective": "Unavailable",
+                "search_provider_fallback": probe_meta.fallback_reason or str(probe_unavailable),
+                "search_llm_assisted": False,
+            }
+        )
+    except Exception as probe_err:
+        _LAST_SEARCH_DIAGNOSTICS.update(
+            {
+                "search_provider_configured": configured_provider,
+                "search_provider_effective": "Unavailable",
+                "search_provider_fallback": f"Probe failed: {probe_err}",
+                "search_llm_assisted": False,
+            }
+        )
     return {
         "started_at": _STARTUP_TIME,
         "scheduler_running": SCHEDULER is not None and SCHEDULER.scheduler.running,
         "active_research": _active_research,
         "max_concurrent_research": MAX_CONCURRENT_RESEARCH,
+        "active_chat": _active_chat,
+        "max_concurrent_chat": MAX_CONCURRENT_CHAT,
         "max_reflections": effective_max_reflections,
-        "rate_limit_per_min": RATE_LIMIT,
+        "rate_limit_backend": _RATE_LIMITER.backend_name,
+        "rate_limit_per_min": ADMIN_RATE_LIMIT,
+        "public_rate_limit_per_min": PUBLIC_RATE_LIMIT,
+        "public_read_rate_limit_per_min": PUBLIC_READ_RATE_LIMIT,
+        "public_export_rate_limit_per_min": PUBLIC_EXPORT_RATE_LIMIT,
+        "run_route_limit_per_min": RUN_ROUTE_LIMIT,
+        "chat_route_limit_per_min": CHAT_ROUTE_LIMIT,
+        "search_provider_configured": _LAST_SEARCH_DIAGNOSTICS.get("search_provider_configured", "Tavily Search API"),
+        "search_provider_effective": _LAST_SEARCH_DIAGNOSTICS.get("search_provider_effective", "Unavailable"),
+        "search_provider_fallback": _LAST_SEARCH_DIAGNOSTICS.get("search_provider_fallback", ""),
+        "search_llm_assisted": bool(_LAST_SEARCH_DIAGNOSTICS.get("search_llm_assisted", False)),
         "jobs": jobs,
     }
 
@@ -674,6 +1033,7 @@ def update_app_config(payload: AppConfigUpdateRequest):
 @app.post("/api/run", response_model=RunResponse)
 def start_run(payload: RunRequest):
     global _active_research
+    language_used = _normalize_language(payload.language)
     with _research_lock:
         if _active_research >= MAX_CONCURRENT_RESEARCH:
             raise HTTPException(status_code=429, detail=f"Too many concurrent research tasks (max {MAX_CONCURRENT_RESEARCH})")
@@ -683,11 +1043,11 @@ def start_run(payload: RunRequest):
         with _research_lock:
             _active_research -= 1
         raise HTTPException(status_code=400, detail="Run already exists")
-    record = RunRecord(run_id=run_id, query=payload.query)
+    record = RunRecord(run_id=run_id, query=payload.query, language_used=language_used)
     RUNS[run_id] = record
-    thread = threading.Thread(target=_run_job, args=(run_id, payload.query), daemon=True)
+    thread = threading.Thread(target=_run_job, args=(run_id, payload.query, language_used), daemon=True)
     thread.start()
-    return RunResponse(run_id=run_id, status="running")
+    return RunResponse(run_id=run_id, status="running", language_used=language_used)
 
 
 @app.get("/api/status/{run_id}", response_model=StatusResponse)
@@ -700,6 +1060,7 @@ def get_status(run_id: str):
             events=record.events,
             report_path=record.report_path,
             report_content=record.report_content,
+            language_used=record.language_used,
         )
     if DB is not None:
         row = DB.get_research_run(run_id)
@@ -710,6 +1071,7 @@ def get_status(run_id: str):
                 events=[],
                 report_path=row.get("report_path"),
                 report_content=row.get("report_content"),
+                language_used=row.get("language_used"),
             )
     raise HTTPException(status_code=404, detail="Run not found")
 
@@ -727,13 +1089,18 @@ def get_history(page: int = 1, size: int = 10, status: Optional[str] = None, q: 
             "run_id": r.run_id,
             "query": r.query,
             "status": r.status,
+            "language_used": r.language_used,
             "started_at": r.started_at,
             "finished_at": r.finished_at,
+            "created_at": r.started_at or r.finished_at,
             "report_path": r.report_path,
+            "source_count": _estimate_source_count(r.report_content),
         })
     if DB is not None:
         for row in DB.list_research_runs(limit=200):
             if row["run_id"] not in memory_ids:
+                row["source_count"] = _estimate_source_count(row.get("report_content"))
+                row.pop("report_content", None)
                 results.append(row)
     # Filter
     if status:
@@ -860,7 +1227,7 @@ def _load_brief_items(topic_id: int, date_str: str) -> List[Dict]:
 
 
 @app.post("/api/topics/{topic_id}/brief")
-def generate_brief(topic_id: int):
+def generate_brief(topic_id: int, payload: Optional[BriefGenerateRequest] = None):
     if DB is None:
         raise HTTPException(status_code=500, detail="DB not initialized")
     topic = DB.get_topic(topic_id)
@@ -873,10 +1240,15 @@ def generate_brief(topic_id: int):
         source_weights = DB.get_source_reputations(topic_id)
         config = DB.get_app_config()
         merged_config = {**APP_CONFIG_DEFAULTS, **config}
+        requested_language = _normalize_language(payload.language if payload else None)
+        if payload and payload.language:
+            merged_config["report_language"] = requested_language
+        else:
+            requested_language = _normalize_language(merged_config.get("report_language"))
         brief = build_brief_for_topic(topic, items, source_weights=source_weights, app_config=merged_config)
         DB.save_brief(topic_id, date_str, brief, len(items))
         DB.log_brief_run(topic.id, "brief", "ok", items_collected=len(items), started_at=started)
-        return {"topic_id": topic.id, "date": date_str, "items": len(items)}
+        return {"topic_id": topic.id, "date": date_str, "items": len(items), "language_used": requested_language}
     except Exception as e:
         DB.log_brief_run(topic.id, "brief", "failed", error_message=str(e), started_at=started)
         raise HTTPException(status_code=500, detail=f"Brief generation failed: {str(e)}")
@@ -975,10 +1347,14 @@ def latest_brief(topic_id: int):
 
 
 @app.get("/api/briefs/{topic_id}/history")
-def brief_history(topic_id: int, limit: int = 7):
+def brief_history(topic_id: int, limit: int = 7, since_hours: int = 48):
     if DB is None:
         raise HTTPException(status_code=500, detail="DB not initialized")
-    return DB.list_briefs(topic_id, limit=min(limit, 30))
+    if since_hours < 0:
+        raise HTTPException(status_code=400, detail="since_hours must be >= 0")
+    normalized_limit = max(1, min(limit, 30))
+    cutoff_hours: Optional[int] = since_hours if since_hours > 0 else None
+    return DB.list_briefs(topic_id, limit=normalized_limit, since_hours=cutoff_hours)
 
 
 def _extract_domain(url: str) -> str:
@@ -1205,6 +1581,7 @@ class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=500)
     topic_id: Optional[int] = None
     days: int = Field(default=7, ge=1, le=30)
+    language: Optional[str] = Field(default=None, max_length=64)
 
 
 @app.post("/api/chat")
@@ -1213,47 +1590,63 @@ def chat_with_briefs(req: ChatRequest):
     if DB is None:
         raise HTTPException(status_code=500, detail="DB not initialized")
 
-    from datetime import timedelta
+    global _active_chat
+    with _chat_lock:
+        if _active_chat >= MAX_CONCURRENT_CHAT:
+            raise HTTPException(status_code=429, detail=f"Too many concurrent chat tasks (max {MAX_CONCURRENT_CHAT})")
+        _active_chat += 1
+
     cutoff = (datetime.utcnow() - timedelta(days=req.days)).isoformat()
+    language_used = _normalize_language(req.language)
 
-    # Fetch recent briefs (topic-filtered or global)
-    all_briefs = DB.list_recent_briefs(limit=20, topic_id=req.topic_id)
-    briefs = [b for b in all_briefs if (b.get("created_at") or "") >= cutoff]
+    try:
+        # Fetch recent briefs (topic-filtered or global)
+        all_briefs = DB.list_recent_briefs(limit=20, topic_id=req.topic_id)
+        briefs = [b for b in all_briefs if (b.get("created_at") or "") >= cutoff]
 
-    if not briefs:
-        return {"reply": "No recent briefs found for this query.", "sources": []}
+        if not briefs:
+            return {"reply": "No recent briefs found for this query.", "sources": [], "language_used": language_used}
 
-    # Build context: up to 5 briefs, 1500 chars each, total cap 6000 chars
-    blocks: List[str] = []
-    total_chars = 0
-    for b in briefs[:5]:
-        content = (b.get("content") or "")[:1500]
-        if total_chars + len(content) > 6000:
-            break
-        date_label = b.get("date") or b.get("created_at", "")[:10]
-        topic_label = b.get("topic_name", f"Topic {b.get('topic_id', '')}")
-        blocks.append(f"[{date_label} | {topic_label}]\n{content}")
-        total_chars += len(content)
+        # Build context: up to 5 briefs, 1500 chars each, total cap 6000 chars
+        blocks: List[str] = []
+        total_chars = 0
+        for b in briefs[:5]:
+            content = (b.get("content") or "")[:1500]
+            if total_chars + len(content) > 6000:
+                break
+            date_label = b.get("date") or b.get("created_at", "")[:10]
+            topic_label = b.get("topic_name", f"Topic {b.get('topic_id', '')}")
+            blocks.append(f"[{date_label} | {topic_label}]\n{content}")
+            total_chars += len(content)
 
-    context = "\n\n---\n\n".join(blocks)
-    sources = [
-        f"{b.get('date') or (b.get('created_at', '')[:10])} | {b.get('topic_name', '')}"
-        for b in briefs[: len(blocks)]
-    ]
+        context = "\n\n---\n\n".join(blocks)
+        sources = [
+            f"{b.get('date') or (b.get('created_at', '')[:10])} | {b.get('topic_name', '')}"
+            for b in briefs[: len(blocks)]
+        ]
 
-    system_prompt = (
-        "You are a concise news analyst assistant. Answer the user's question based ONLY on "
-        "the provided brief context. Respond in 2-4 sentences in a conversational (not report) tone. "
-        "If the context does not cover the question, say so clearly. "
-        "Cite the brief date and topic you draw from."
-    )
-    user_prompt = f"Context:\n{context}\n\nQuestion: {req.message}"
+        language_hint = {
+            "Chinese (Simplified)": "Write in Simplified Chinese.",
+            "Japanese": "Write in Japanese.",
+        }.get(language_used, "Write in English (US).")
+        system_prompt = (
+            "You are a concise news analyst assistant. Answer the user's question based ONLY on "
+            "the provided brief context. Respond in 2-4 sentences in a conversational (not report) tone. "
+            "If the context does not cover the question, say so clearly. "
+            "Cite the brief date and topic you draw from. "
+            "Keep source titles verbatim in their original language.\n"
+            f"{language_hint}"
+        )
+        user_prompt = f"Context:\n{context}\n\nQuestion: {req.message}"
 
-    reply = llm_chat(system_prompt, user_prompt)
-    if reply is None:
-        reply = "LLM is unavailable. Please try again later."
+        reply = llm_chat(system_prompt, user_prompt)
+        if reply is None:
+            reply = "LLM is unavailable. Please try again later."
 
-    return {"reply": reply, "sources": sources}
+        return {"reply": reply, "sources": sources, "language_used": language_used}
+    finally:
+        with _chat_lock:
+            _active_chat = max(_active_chat - 1, 0)
 
 
 @app.delete("/api/topics/{topic_id}")

@@ -80,9 +80,8 @@ def test_collect_for_topic_rss_only_skips_tavily(monkeypatch):
     assert len(result["rss_health"]) == 1
 
 
-def test_collector_can_disable_tavily_with_global_flag(monkeypatch):
-    monkeypatch.setenv("ARCBRIEF_ENABLE_TAVILY", "0")
-    monkeypatch.setenv("TAVILY_API_KEY", "any-key")
+def test_collector_disables_tavily_when_api_key_missing(monkeypatch):
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
     collector = Collector()
     assert collector.tavily_enabled is False
     assert collector.fetch_tavily("ai") == []

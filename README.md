@@ -1,20 +1,18 @@
-# ArcBrief
+﻿# ArcBrief
 
-ArcBrief 是一个本地优先、可部署的 AI 情报工作台，面向两类核心场景：
-- `Daily Brief`：面向固定 Topic 的自动采集、聚合与简报生成
-- `Deep Research`：多阶段 Agent 研究流程与可追踪报告输出
+ArcBrief 是一个本地优先、可部署的 AI 情报工作台，聚焦两条主线：
+- `Daily Brief`：RSS 采集、聚合、简报生成与多端推送
+- `Deep Research`：多阶段 Agent 流程（Outline -> Search -> Summary -> Host -> Reflection -> Final）
 
-当前版本已经完成前后端联通、数据持久化、定时任务、PDF 导出，以及 Discord 推送/命令集成的可运行闭环。
+当前版本已覆盖前后端联通、SQLite 持久化、定时任务、PDF 导出与 Discord Bot 交互。
 
 ## Highlights
 
-- 多阶段 Research Pipeline：`outline -> search -> summary -> host -> reflection -> final`
-- Daily Brief 全链路：采集、过滤、聚类、摘要、历史查询
-- All Topics Digest 视图：按 Topic 查看最新简报
-- Topic 管理可持久化：启用/暂停状态写入数据库
-- 报告导出：Research / Brief 均支持 PDF
-- 部署就绪：Backend 可部署到 Railway，Frontend 可部署到 Vercel
-- Discord 集成：Webhook 定时推送 + Slash Bot（`/topics`、`/brief`、`/research`）
+- 多阶段 Research Pipeline（可追踪事件流）
+- Daily Brief 全链路（采集、过滤、聚类、摘要、归档）
+- Brief/Report 一键导出 PDF
+- 前端同源 BFF 代理，浏览器不暴露后端密钥
+- 公开演示安全基线：只读公开 + 限额交互 + 管理操作默认关闭
 
 ## Tech Stack
 
@@ -45,7 +43,8 @@ ArcBrief/
 
 ```bash
 pip install -r requirements.txt
-cd frontend && npm install
+cd frontend 
+npm install
 ```
 
 2. 配置环境变量（最小必填）
@@ -55,11 +54,10 @@ FQ_LLM_API_KEY=...
 FQ_LLM_BASE_URL=...
 FQ_LLM_MODEL=...
 ARCBRIEF_API_KEY=replace-with-your-key
+ARCBRIEF_PUBLIC_API_KEY=replace-with-public-key
 ```
 
-说明：
-- 完整模板见 `.env.example`
-- 当前默认策略是 RSS-only（可在 `.env` 中切换 Tavily）
+完整变量见 `.env.example`。
 
 3. 启动服务
 
@@ -68,22 +66,41 @@ ARCBRIEF_API_KEY=replace-with-your-key
 uvicorn backend.main:app --reload --port 8000
 
 # Terminal 2
-cd frontend && npm run dev
+cd frontend 
+npm run dev
 ```
 
 访问：`http://localhost:3000`
 
 ## Deploy Snapshot
 
-推荐部署拓扑：
-- Backend: Railway（使用 `Dockerfile`）
-- Frontend: Vercel（Root Directory = `frontend`）
-- Discord Bot: Railway 第二服务（使用 `railway.bot.json` + `Dockerfile.bot`）
+推荐拓扑：
+- Backend: Railway（`Dockerfile`）
+- Frontend: Vercel（Root Directory=`frontend`）
+- Discord Bot: Railway 第二服务（`railway.bot.json` + `Dockerfile.bot`）
 
-核心环境变量：
-- Backend: `ARCBRIEF_API_KEY`、`ALLOWED_ORIGINS`、`ARCBRIEF_DB_PATH=/data/arcbrief.db`、`ARCBRIEF_SCHED_TZ`（例如 `America/Toronto`）
-- Frontend: `NEXT_PUBLIC_API_BASE`、`NEXT_PUBLIC_ARCBRIEF_API_KEY`
-- Bot: `DISCORD_TOKEN`、`ARCBRIEF_API_BASE`、`ARCBRIEF_API_KEY`
+关键环境变量：
+- Backend:
+  - `ARCBRIEF_API_KEY`
+  - `ARCBRIEF_PUBLIC_API_KEY`
+  - `ARCBRIEF_PUBLIC_READ_RATE_LIMIT_PER_MIN`
+  - `ARCBRIEF_PUBLIC_EXPORT_RATE_LIMIT_PER_MIN`
+  - `ARCBRIEF_RATE_LIMIT_STORAGE_URI`（生产建议 Redis）
+  - `ARCBRIEF_RESEARCH_STRICT_PROVIDER=1`（provider 不可用时 Research 直接失败）
+  - `ZHIPU_OPENAI_BASE_URL`、`ZHIPU_WEB_SEARCH_MODEL`
+  - `VOLCENGINE_OPENAI_BASE_URL`、`VOLCENGINE_MODEL_EP`
+  - `ARCBRIEF_PROXY_SIGNING_SECRET`
+  - `ALLOWED_ORIGINS`
+  - `ARCBRIEF_DB_PATH=/data/arcbrief.db`
+- Frontend (BFF):
+  - `ARCBRIEF_PROXY_API_BASE`
+  - `ARCBRIEF_PROXY_API_KEY`（必须使用 `ARCBRIEF_PUBLIC_API_KEY`，不可使用 admin key）
+  - `ARCBRIEF_PROXY_SIGNING_SECRET`（与后端一致）
+  - `NEXT_PUBLIC_ARCBRIEF_ENABLE_ADMIN_ACTIONS=0`（公开演示默认）
+- Bot:
+  - `DISCORD_TOKEN`
+  - `ARCBRIEF_API_BASE`
+  - `ARCBRIEF_API_KEY`
 
 ## Core APIs
 
@@ -105,6 +122,20 @@ Brief:
 System:
 - `GET /api/health`
 
+## Security Notes (Phase 3A.1)
+
+- 前端 BFF 仅放行：公开 GET + `POST /run` + `POST /chat`
+- 管理写接口不再经公网 BFF 暴露
+- 后端不再信任裸 `X-Forwarded-For`，仅信任带签名的 `X-Arcbrief-*` 头
+- 公开 GET 端点纳入独立限流策略
+- 限流支持 Redis 共享桶，避免多实例失效
+
+## Provider Notes (Phase 3A.4)
+
+- OpenAI 兼容 provider：`Zhipu`、`Volcano`
+- 自定义搜索 API provider：`Exa`、`Bocha`、`Tavily`
+- Diagnostics 为实时探测语义：当 provider 不可用时 `Effective provider = Unavailable`
+
 ## Default Topics
 
 首次启动数据库为空时会注入：
@@ -112,8 +143,8 @@ System:
 - `Macro and Metals`（default inactive）
 - `AI Daily`（active）
 
-## Roadmap (Next)
+## Roadmap
 
-- 提升 Brief 内容质量与覆盖率评估
-- 完成 Topic 反馈闭环（feedback -> ranking）
-- 强化生产安全（更细粒度认证与权限）
+- 提升 Brief 覆盖率与质量评估
+- 强化 Topic 反馈闭环（feedback -> ranking）
+- 继续完善公开演示安全基线与可观测性

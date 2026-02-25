@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import time
 from typing import Any, Dict, List, Optional
 
 import aiohttp
@@ -12,6 +13,12 @@ from discord import app_commands
 API_BASE = os.getenv("ARCBRIEF_API_BASE", "http://localhost:8000/api")
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
 API_KEY = os.getenv("ARCBRIEF_API_KEY", "arcbrief-local-dev-key")
+CONFIG_CACHE_TTL_SECONDS = 300
+LANGUAGE_MAP = {
+    "en": "English (US)",
+    "zh": "Chinese (Simplified)",
+    "ja": "Japanese",
+}
 
 
 async def api_get(path: str) -> Any:
@@ -45,12 +52,44 @@ class ArcBriefBot(discord.Client):
     def __init__(self):
         super().__init__(intents=discord.Intents.default())
         self.tree = app_commands.CommandTree(self)
+        self._config_cache: Dict[str, Any] = {}
+        self._config_cached_at = 0.0
+        self._config_lock = asyncio.Lock()
 
     async def setup_hook(self):
         await self.tree.sync()
 
+    async def get_default_language(self) -> str:
+        now = time.time()
+        if self._config_cache and now - self._config_cached_at <= CONFIG_CACHE_TTL_SECONDS:
+            lang = str(self._config_cache.get("report_language") or "").strip()
+            return lang if lang in LANGUAGE_MAP.values() else "English (US)"
+
+        async with self._config_lock:
+            now = time.time()
+            if self._config_cache and now - self._config_cached_at <= CONFIG_CACHE_TTL_SECONDS:
+                lang = str(self._config_cache.get("report_language") or "").strip()
+                return lang if lang in LANGUAGE_MAP.values() else "English (US)"
+            try:
+                cfg = await api_get("/config")
+                if isinstance(cfg, dict):
+                    self._config_cache = cfg
+                    self._config_cached_at = now
+                    lang = str(cfg.get("report_language") or "").strip()
+                    if lang in LANGUAGE_MAP.values():
+                        return lang
+            except Exception:
+                pass
+        return "English (US)"
+
 
 bot = ArcBriefBot()
+
+
+async def resolve_output_language(lang: Optional[str]) -> str:
+    if lang and lang in LANGUAGE_MAP:
+        return LANGUAGE_MAP[lang]
+    return await bot.get_default_language()
 
 
 @bot.tree.command(name="topics", description="List ArcBrief topics with status")
@@ -88,17 +127,25 @@ async def latest_brief(interaction: discord.Interaction, topic_id: int):
 
 
 @bot.tree.command(name="research", description="Run a deep research query")
-@app_commands.describe(query="Research question")
-async def research(interaction: discord.Interaction, query: str):
+@app_commands.describe(query="Research question", lang="Output language (optional)")
+@app_commands.choices(
+    lang=[
+        app_commands.Choice(name="English", value="en"),
+        app_commands.Choice(name="中文", value="zh"),
+        app_commands.Choice(name="日本語", value="ja"),
+    ]
+)
+async def research(interaction: discord.Interaction, query: str, lang: Optional[app_commands.Choice[str]] = None):
     await interaction.response.defer(thinking=True)
     try:
-        run = await api_post("/run", {"query": query})
+        language = await resolve_output_language(lang.value if lang else None)
+        run = await api_post("/run", {"query": query, "language": language})
         run_id = run.get("run_id")
         if not run_id:
             await interaction.followup.send("Failed to start run.")
             return
 
-        await interaction.followup.send(f"Started research: `{run_id}`. Polling for completion...")
+        await interaction.followup.send(f"Started research: `{run_id}` ({language}). Polling for completion...")
 
         report = ""
         for _ in range(180):
@@ -125,10 +172,24 @@ async def research(interaction: discord.Interaction, query: str):
 @app_commands.describe(
     question="Your question (e.g. 'What happened with OpenAI this week?')",
     topic="Optional topic filter: 'ai', 'policy', 'global', 'macro'",
+    lang="Output language (optional)",
 )
-async def ask(interaction: discord.Interaction, question: str, topic: Optional[str] = None):
+@app_commands.choices(
+    lang=[
+        app_commands.Choice(name="English", value="en"),
+        app_commands.Choice(name="中文", value="zh"),
+        app_commands.Choice(name="日本語", value="ja"),
+    ]
+)
+async def ask(
+    interaction: discord.Interaction,
+    question: str,
+    topic: Optional[str] = None,
+    lang: Optional[app_commands.Choice[str]] = None,
+):
     await interaction.response.defer(thinking=True)
     topic_id = None
+    language = await resolve_output_language(lang.value if lang else None)
     if topic:
         try:
             topics = await api_get("/topics")
@@ -139,7 +200,7 @@ async def ask(interaction: discord.Interaction, question: str, topic: Optional[s
             pass  # topic filter is optional; proceed without it
 
     try:
-        result = await api_post("/chat", {"message": question, "topic_id": topic_id})
+        result = await api_post("/chat", {"message": question, "topic_id": topic_id, "language": language})
         reply = result.get("reply", "No relevant information found.")
         sources = result.get("sources", [])
         response = reply

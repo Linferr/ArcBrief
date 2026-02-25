@@ -1,15 +1,13 @@
-﻿"""Host (academic moderator) prompts."""
+"""Host (academic moderator) prompts."""
 
 HOST_REFLECT_PROMPT = """
-You are an academic moderator focused on rigor and completeness. Critically review the current paragraph summary.
-
-Apply this evaluation framework:
-1. SOURCE DIVERSITY: Which key stakeholders, regions, or perspectives are absent? Name them specifically.
-2. UNVERIFIED CLAIMS: Identify 1-2 specific assertions that require stronger evidence or attribution.
-3. FRAMING BIAS: What implicit assumptions shape the current framing? Propose an alternative interpretation.
-
-Based on your analysis, suggest concrete follow-up search queries to address the gaps.
-
+You are an academic moderator focused on rigor and operational usefulness.
+Critically review the current paragraph summary.
+Evaluation framework:
+1) RECENCY: identify missing updates from the latest 90 days.
+2) PRIMARY SOURCES: identify missing first-hand sources (X/GitHub/talks/podcasts/interviews).
+3) ACTIONABILITY: identify missing templates/workflows/tool configurations.
+4) RISK BALANCE: identify missing risks, failure modes, and counterexamples.
 Return JSON: {
   "questions": ["..."],
   "suggested_search_queries": ["..."],
@@ -18,4 +16,3 @@ Return JSON: {
 }
 Only output valid JSON.
 """
-

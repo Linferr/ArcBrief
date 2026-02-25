@@ -1,10 +1,11 @@
-const API = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:8000/api';
-const API_KEY = process.env.NEXT_PUBLIC_ARCBRIEF_API_KEY || 'arcbrief-local-dev-key';
+const API = '/api/proxy';
 
 export const apiFetch = (path: string, init: RequestInit = {}) => {
-  const headers = new Headers(init.headers || {});
-  headers.set('X-API-Key', API_KEY);
-  return fetch(`${API}${path}`, { ...init, headers });
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  return fetch(`${API}${normalizedPath}`, {
+    ...init,
+    cache: 'no-store',
+  });
 };
 
 export const markdownToPlainText = (input: string): string => {
@@ -90,7 +91,15 @@ export type RunEvent = {
   total_paragraphs?: number;
   round?: number;
 };
-export type RunSummary = { run_id: string; query: string; status: string; created_at?: string };
+export type RunSummary = {
+  run_id: string;
+  query: string;
+  status: string;
+  created_at?: string;
+  started_at?: string;
+  finished_at?: string;
+  source_count?: number;
+};
 
 export type Topic = {
   id: number;
@@ -133,8 +142,20 @@ export type SystemStatus = {
   scheduler_running: boolean;
   active_research: number;
   max_concurrent_research: number;
+  active_chat?: number;
+  max_concurrent_chat?: number;
   max_reflections: number;
+  rate_limit_backend?: string;
   rate_limit_per_min: number;
+  public_rate_limit_per_min?: number;
+  public_read_rate_limit_per_min?: number;
+  public_export_rate_limit_per_min?: number;
+  run_route_limit_per_min?: number;
+  chat_route_limit_per_min?: number;
+  search_provider_configured?: string;
+  search_provider_effective?: string;
+  search_provider_fallback?: string;
+  search_llm_assisted?: boolean;
   jobs: { id: string; next_run: string | null; trigger: string }[];
 };
 
@@ -156,12 +177,17 @@ export type AppConfig = {
   report_language: string;
   primary_model: string;
   search_provider: string;
+  brief_generation_framework?: string;
+  research_recency_mode?: string;
   entity_watchlist: string;
 };
 
 export const PIPELINE_STAGES = [
   { key: 'outline', label: 'Outline' },
+  { key: 'search_provider', label: 'Search Provider' },
   { key: 'search', label: 'Search' },
+  { key: 'search_window', label: 'Evidence Window' },
+  { key: 'search_fallback', label: 'Search Fallback' },
   { key: 'summary', label: 'Summary' },
   { key: 'host', label: 'Host Critique' },
   { key: 'reflection', label: 'Reflection' },

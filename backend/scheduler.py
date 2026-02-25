@@ -14,6 +14,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
+from .constants import APP_CONFIG_DEFAULTS
 from .collection import Collector, collect_for_topic
 from .briefing import build_brief_for_topic
 
@@ -176,7 +177,15 @@ class ArcBriefScheduler:
         date_str = datetime.now().strftime("%Y-%m-%d")
         try:
             items = self.db.get_recent_articles(topic_id, hours=brief_hours)
-            brief = build_brief_for_topic(topic, items)
+            config = self.db.get_app_config()
+            merged_config = {**APP_CONFIG_DEFAULTS, **config}
+            source_weights = self.db.get_source_reputations(topic_id)
+            brief = build_brief_for_topic(
+                topic,
+                items,
+                source_weights=source_weights,
+                app_config=merged_config,
+            )
             self.db.save_brief(topic_id, date_str, brief, len(items))
             self.db.log_brief_run(topic.id, "brief", "ok", items_collected=len(items), started_at=started)
             logger.info(f"Brief generated for topic {topic.name}: {len(items)} articles")

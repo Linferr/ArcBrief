@@ -116,6 +116,7 @@ class ArcBriefDB:
                     run_id TEXT NOT NULL UNIQUE,
                     query TEXT NOT NULL,
                     status TEXT NOT NULL,
+                    language_used TEXT,
                     report_path TEXT,
                     report_content TEXT,
                     started_at TEXT,
@@ -166,6 +167,7 @@ class ArcBriefDB:
                 FOREIGN KEY(topic_id) REFERENCES topics(id),
                 UNIQUE(topic_id, source_domain)
              )"""),
+        (6, "ALTER TABLE research_runs ADD COLUMN language_used TEXT"),
     ]
 
     def _run_migrations(self, conn: sqlite3.Connection) -> None:
@@ -532,12 +534,24 @@ class ArcBriefDB:
             ).fetchone()
         return dict(row) if row else None
 
-    def list_briefs(self, topic_id: int, limit: int = 14) -> List[Dict[str, Any]]:
+    def list_briefs(self, topic_id: int, limit: int = 14, since_hours: Optional[int] = None) -> List[Dict[str, Any]]:
         with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM briefs WHERE topic_id = ? ORDER BY created_at DESC LIMIT ?",
-                (topic_id, limit),
-            ).fetchall()
+            if since_hours is not None and since_hours > 0:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM briefs
+                    WHERE topic_id = ?
+                      AND datetime(created_at) >= datetime('now', ?)
+                    ORDER BY datetime(created_at) DESC, id DESC
+                    LIMIT ?
+                    """,
+                    (topic_id, f"-{int(since_hours)} hours", limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM briefs WHERE topic_id = ? ORDER BY created_at DESC LIMIT ?",
+                    (topic_id, limit),
+                ).fetchall()
         return [dict(r) for r in rows]
 
     def list_recent_briefs(self, limit: int = 40, topic_id: Optional[int] = None) -> List[Dict[str, Any]]:
@@ -582,6 +596,7 @@ class ArcBriefDB:
         return [dict(r) for r in rows]
 
     def save_research_run(self, run_id: str, query: str, status: str,
+                          language_used: Optional[str] = None,
                           report_path: Optional[str] = None,
                           report_content: Optional[str] = None,
                           started_at: Optional[str] = None,
@@ -590,17 +605,17 @@ class ArcBriefDB:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO research_runs
-                (run_id, query, status, report_path, report_content, started_at, finished_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                (run_id, query, status, language_used, report_path, report_content, started_at, finished_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (run_id, query, status, report_path, report_content, started_at, finished_at),
+                (run_id, query, status, language_used, report_path, report_content, started_at, finished_at),
             )
 
     def list_research_runs(self, limit: int = 20) -> List[Dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT run_id, query, status, report_path, started_at, finished_at
+                SELECT run_id, query, status, language_used, report_path, report_content, started_at, finished_at, created_at
                 FROM research_runs
                 ORDER BY created_at DESC
                 LIMIT ?

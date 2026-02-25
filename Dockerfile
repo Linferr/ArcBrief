@@ -26,4 +26,4 @@ EXPOSE 8000
 
 # workers=1 强制单进程 —— SQLite + APScheduler 不支持多进程并发
 # Bind to Railway-provided PORT in production, fallback to 8000 for local docker runs.
-CMD ["sh", "-c", "uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]
+CMD ["sh", "-c", "uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --proxy-headers --forwarded-allow-ips ${FORWARDED_ALLOW_IPS:-127.0.0.1}"]

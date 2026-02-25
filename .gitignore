@@ -12,6 +12,7 @@ _test_outputs/
 __pycache__/
 .pytest_cache/
 .venv/
+.pycache_tmp/
 *.pyc
 *.pyo
 *.pyd
@@ -20,6 +21,8 @@ __pycache__/
 arcbrief.db
 arcbrief.db-shm
 arcbrief.db-wal
+_tmp_phase3_test.db
+_tmp_phase3_test.db-journal
 
 # Node / Next.js
 frontend/node_modules/

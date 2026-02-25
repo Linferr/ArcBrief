@@ -3,13 +3,15 @@
 from typing import Dict, List
 from .base import BaseNode
 from ..prompts.host_prompts import HOST_REFLECT_PROMPT
+from ..prompts.prompts import language_instruction
 from ..utils import parse_json_fallback, ensure_list
 
 
 class HostNode(BaseNode):
-    def run(self, title: str, content: str, latest: str) -> Dict[str, List[str]]:
+    def run(self, title: str, content: str, latest: str, language: str = "English (US)") -> Dict[str, List[str]]:
         payload = f"title: {title}\ncontent: {content}\nlatest: {latest}"
-        raw = self.llm.invoke(HOST_REFLECT_PROMPT, payload)
+        system_prompt = f"{HOST_REFLECT_PROMPT}\n{language_instruction(language)}"
+        raw = self.llm.invoke(system_prompt, payload)
         default = {
             "questions": ["What key evidence or statistics are missing?"],
             "suggested_search_queries": [f"{title} evidence statistics"],

@@ -1146,11 +1146,33 @@ code,
 
 /* Deep Research */
 .research-panel {
-  max-width: 920px;
+  max-width: 1240px;
+}
+
+.research-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 24px;
+  align-items: start;
+}
+
+.research-main {
+  display: grid;
+  gap: 24px;
+}
+
+.research-rail {
+  display: grid;
+  gap: 14px;
+  border-left: 1px solid var(--border-color);
+  padding-left: 24px;
+  position: sticky;
+  top: 0;
+  align-self: start;
 }
 
 .research-input-section {
-  margin-bottom: 38px;
+  margin-bottom: 0;
 }
 
 .research-input-label {
@@ -1240,24 +1262,6 @@ code,
   font-size: 12px;
 }
 
-.pipeline-meta {
-  margin: 0 0 16px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  color: var(--text-secondary);
-  font-size: 11px;
-  border-bottom: 1px solid var(--border-color);
-  padding-bottom: 8px;
-}
-
-.pipeline-query {
-  width: 100%;
-  text-overflow: ellipsis;
-  overflow: hidden;
-  white-space: nowrap;
-}
-
 .pipeline-timeline {
   border-left: 1px solid var(--border-color);
   padding-left: 16px;
@@ -1328,7 +1332,9 @@ code,
 
 .compact-log {
   margin-top: 12px;
-  max-height: 130px;
+  max-height: 165px;
+  border-left: none;
+  padding-left: 0;
 }
 
 .log-line {
@@ -1343,6 +1349,12 @@ code,
   align-items: center;
   gap: 8px;
   margin-bottom: 10px;
+}
+
+.report-card {
+  padding: 0;
+  background: transparent;
+  border: none;
 }
 
 .report-toolbar {
@@ -1408,6 +1420,55 @@ code,
   font-size: 10px;
   color: var(--text-tertiary);
   opacity: 0.65;
+}
+
+.recent-runs-collapsible {
+  display: grid;
+  gap: 12px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
+
+.recent-runs-head {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+}
+
+.recent-runs-list {
+  display: grid;
+  gap: 10px;
+}
+
+.recent-run-item {
+  border-radius: 0;
+  display: block;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.recent-run-item:hover {
+  border-left-color: var(--border-color);
+}
+
+.recent-run-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 3px;
+}
+
+.recent-runs-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.recent-runs-footer .ghost {
+  width: 100%;
 }
 
 .history {
@@ -2041,6 +2102,14 @@ code,
 
   .grid-two {
     grid-template-columns: 1fr;
+  }
+
+  .research-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .research-rail {
+    position: static;
   }
 
   .research-query-input {

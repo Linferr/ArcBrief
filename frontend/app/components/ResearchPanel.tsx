@@ -1,7 +1,127 @@
-﻿'use client';
+'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 import { apiFetch, downloadPdfResponse, markdownToPlainText, readErrorMessage, RunEvent, RunSummary } from './api';
+
+const RECENT_COLLAPSED_COUNT = 3;
+const ITERATIVE_LOG_LIMIT = 6;
+const DISPLAY_ROUNDS = 3;
+
+type UILanguage = 'English (US)' | 'Chinese (Simplified)' | 'Japanese';
+
+type IterativeLabels = {
+  search: string;
+  summary: string;
+  host: string;
+  reflection: string;
+};
+
+type PipelineText = {
+  pipelineTitle: string;
+  decompositionTitle: string;
+  decompositionPending: string;
+  decompositionDone: (segments: number) => string;
+  iterativeTitle: string;
+  synthesisTitle: string;
+  synthesisRunning: string;
+  synthesisDone: string;
+  completed: string;
+  roundLabel: string;
+  reportPreview: string;
+  recentRuns: string;
+  expand: string;
+  collapse: string;
+  loadMore: string;
+  noHistory: string;
+  iterativeStageLabels: IterativeLabels;
+};
+
+const PIPELINE_COPY: Record<UILanguage, PipelineText> = {
+  'English (US)': {
+    pipelineTitle: 'Pipeline Progress',
+    decompositionTitle: 'Query Decomposition',
+    decompositionPending: 'Awaiting run start.',
+    decompositionDone: (segments: number) => `Mapped into ${segments} analysis segments.`,
+    iterativeTitle: 'Iterative Research',
+    synthesisTitle: 'Synthesis & Reporting',
+    synthesisRunning: 'Composing final narrative and citations.',
+    synthesisDone: 'Final report generated.',
+    completed: 'Completed',
+    roundLabel: 'Round',
+    reportPreview: 'Report Preview',
+    recentRuns: 'Recent Runs',
+    expand: 'Expand',
+    collapse: 'Collapse',
+    loadMore: 'Load More',
+    noHistory: 'No research history yet.',
+    iterativeStageLabels: {
+      search: 'Search',
+      summary: 'Summary',
+      host: 'Host Critique',
+      reflection: 'Reflection',
+    },
+  },
+  'Chinese (Simplified)': {
+    pipelineTitle: 'Pipeline Progress',
+    decompositionTitle: 'Query Decomposition',
+    decompositionPending: 'Awaiting run start.',
+    decompositionDone: (segments: number) => `Mapped into ${segments} analysis segments.`,
+    iterativeTitle: 'Iterative Research',
+    synthesisTitle: 'Synthesis & Reporting',
+    synthesisRunning: 'Composing final narrative and citations.',
+    synthesisDone: 'Final report generated.',
+    completed: 'Completed',
+    roundLabel: 'Round',
+    reportPreview: 'Report Preview',
+    recentRuns: 'Recent Runs',
+    expand: 'Expand',
+    collapse: 'Collapse',
+    loadMore: 'Load More',
+    noHistory: 'No research history yet.',
+    iterativeStageLabels: {
+      search: 'Search',
+      summary: 'Summary',
+      host: 'Host Critique',
+      reflection: 'Reflection',
+    },
+  },
+  Japanese: {
+    pipelineTitle: 'Pipeline Progress',
+    decompositionTitle: 'Query Decomposition',
+    decompositionPending: 'Awaiting run start.',
+    decompositionDone: (segments: number) => `Mapped into ${segments} analysis segments.`,
+    iterativeTitle: 'Iterative Research',
+    synthesisTitle: 'Synthesis & Reporting',
+    synthesisRunning: 'Composing final narrative and citations.',
+    synthesisDone: 'Final report generated.',
+    completed: 'Completed',
+    roundLabel: 'Round',
+    reportPreview: 'Report Preview',
+    recentRuns: 'Recent Runs',
+    expand: 'Expand',
+    collapse: 'Collapse',
+    loadMore: 'Load More',
+    noHistory: 'No research history yet.',
+    iterativeStageLabels: {
+      search: 'Search',
+      summary: 'Summary',
+      host: 'Host Critique',
+      reflection: 'Reflection',
+    },
+  },
+};
+
+const formatRunTimestamp = (run: RunSummary): string => {
+  const ts = run.created_at || run.started_at || run.finished_at;
+  if (!ts) return 'N/A';
+  return new Date(ts).toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+};
 
 interface Props {
   onRunningChange?: (running: boolean) => void;
@@ -18,29 +138,21 @@ export default function ResearchPanel({ onRunningChange, pendingQuery, onPending
   const [history, setHistory] = useState<RunSummary[]>([]);
   const [historyTotal, setHistoryTotal] = useState(0);
   const [historyPage, setHistoryPage] = useState(1);
-  const [historyStatus, setHistoryStatus] = useState<'all' | 'running' | 'done' | 'failed'>('all');
-  const [historyQuery, setHistoryQuery] = useState('');
+  const [recentExpanded, setRecentExpanded] = useState(false);
   const [selectedRun, setSelectedRun] = useState<RunSummary | null>(null);
   const [fullReport, setFullReport] = useState('');
   const [isReportOpen, setIsReportOpen] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
   const [notice, setNotice] = useState('');
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [maxReflections, setMaxReflections] = useState(3);
   const [previewRunId, setPreviewRunId] = useState<string | null>(null);
   const [previewTitle, setPreviewTitle] = useState('');
   const [previewReport, setPreviewReport] = useState('');
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [runLanguage, setRunLanguage] = useState<UILanguage>('English (US)');
 
   useEffect(() => {
     onRunningChange?.(status === 'running');
   }, [status, onRunningChange]);
-
-  useEffect(() => {
-    if (status !== 'running') { setElapsedSeconds(0); return; }
-    const timer = setInterval(() => setElapsedSeconds(s => s + 1), 1000);
-    return () => clearInterval(timer);
-  }, [status]);
 
   useEffect(() => {
     if (pendingQuery) {
@@ -49,45 +161,40 @@ export default function ResearchPanel({ onRunningChange, pendingQuery, onPending
     }
   }, [pendingQuery, onPendingQueryConsumed]);
 
-  const formatElapsed = (s: number) => {
-    const m = Math.floor(s / 60);
-    const sec = s % 60;
-    return `${m}:${sec.toString().padStart(2, '0')}`;
-  };
-
-  const loadHistory = async (
-    page = 1,
-    statusFilter = historyStatus,
-    keywordFilter = historyQuery
-  ) => {
+  const loadHistory = async (page = 1, append = false) => {
     try {
       const params = new URLSearchParams();
       params.set('page', String(page));
       params.set('size', '10');
-      if (statusFilter !== 'all') params.set('status', statusFilter);
-      if (keywordFilter.trim()) params.set('q', keywordFilter.trim());
       const res = await apiFetch(`/history?${params.toString()}`);
-      if (res.ok) {
-        const data = await res.json();
-        setHistory(data.results || []);
-        setHistoryTotal(data.total || 0);
-        setHistoryPage(data.page || 1);
-      }
+      if (!res.ok) return;
+      const data = await res.json();
+      const results: RunSummary[] = data.results || [];
+      setHistory((prev) => {
+        if (!append) return results;
+        const merged = [...prev];
+        for (const item of results) {
+          if (!merged.find((entry) => entry.run_id === item.run_id)) merged.push(item);
+        }
+        return merged;
+      });
+      setHistoryTotal(data.total || 0);
+      setHistoryPage(data.page || 1);
     } catch {}
   };
 
   useEffect(() => {
     loadHistory();
-    apiFetch('/system/status')
-      .then(r => r.ok ? r.json() : null)
-      .then(d => d?.max_reflections && setMaxReflections(d.max_reflections))
+    apiFetch('/config')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        const lang = d?.report_language;
+        if (lang === 'Chinese (Simplified)' || lang === 'Japanese' || lang === 'English (US)') {
+          setRunLanguage(lang);
+        }
+      })
       .catch(() => {});
   }, []);
-
-  useEffect(() => {
-    loadHistory(1, historyStatus, historyQuery);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [historyStatus]);
 
   useEffect(() => {
     if (!runId) return;
@@ -132,7 +239,7 @@ export default function ResearchPanel({ onRunningChange, pendingQuery, onPending
       const res = await apiFetch('/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: cleanQuery }),
+        body: JSON.stringify({ query: cleanQuery, language: runLanguage }),
       });
       const data = await res.json();
       if (data.run_id) setRunId(data.run_id);
@@ -183,7 +290,11 @@ export default function ResearchPanel({ onRunningChange, pendingQuery, onPending
     setPreviewLoading(false);
   };
 
-  const closeReport = () => { setIsReportOpen(false); setSelectedRun(null); setFullReport(''); };
+  const closeReport = () => {
+    setIsReportOpen(false);
+    setSelectedRun(null);
+    setFullReport('');
+  };
 
   const downloadReportPdf = async (targetRunId: string) => {
     try {
@@ -195,44 +306,28 @@ export default function ResearchPanel({ onRunningChange, pendingQuery, onPending
     }
   };
 
-  const stages = useMemo(() => events.map(e => e.stage), [events]);
-  const stageNow = stages[stages.length - 1] || 'idle';
-  const lastWithParagraph = useMemo(
-    () => [...events].reverse().find(e => e.paragraph_idx && e.total_paragraphs),
+  const semanticStages = ['outline', 'search', 'summary', 'host', 'reflection', 'final', 'error'];
+  const lastSemanticEvent = useMemo(
+    () => [...events].reverse().find((e) => semanticStages.includes(e.stage)),
     [events]
   );
-  const totalParagraphs = lastWithParagraph?.total_paragraphs || 1;
-  const totalRounds = (maxReflections || 3) + 1;
-  const currentRound = Math.min(lastWithParagraph?.round || 1, totalRounds);
-  const stageWeight: Record<string, number> = {
-    outline: 0.05,
-    search: 0.25,
-    summary: 0.6,
-    host: 0.75,
-    reflection: 0.9,
-    final: 1,
-    error: 1,
-  };
-  const base = ((lastWithParagraph?.paragraph_idx || 1) - 1) * totalRounds + (currentRound - 1);
-  const progress = Math.min(
-    (base + (stageWeight[stageNow] ?? 0.1)) / (totalParagraphs * totalRounds),
-    1
+  const stageNow =
+    status === 'done' || status === 'failed' || status === 'timeout'
+      ? 'final'
+      : (lastSemanticEvent?.stage || 'idle');
+  const lastWithParagraph = useMemo(
+    () => [...events].reverse().find((e) => e.paragraph_idx && e.total_paragraphs),
+    [events]
   );
-  const stageLabelMap: Record<string, string> = {
-    outline: 'Outline',
-    search: 'Search',
-    summary: 'Summary',
-    host: 'Host Critique',
-    reflection: 'Reflection',
-    final: 'Final',
-    error: 'Error',
+  const totalParagraphs = lastWithParagraph?.total_paragraphs || 0;
+  const roundEvent = [...events].reverse().find((e) => typeof e.round === 'number' && e.round > 0);
+  const currentRound = Math.min(Math.max(roundEvent?.round || 1, 1), DISPLAY_ROUNDS);
+  const iterativeStageWeight: Record<string, number> = {
+    search: 0.2,
+    summary: 0.5,
+    host: 0.8,
+    reflection: 1,
   };
-  const progressLabel = lastWithParagraph
-    ? `Paragraph ${lastWithParagraph.paragraph_idx}/${totalParagraphs} | ${stageLabelMap[stageNow] || stageNow} (Round ${currentRound}/${totalRounds})`
-    : `Stage: ${stageLabelMap[stageNow] || stageNow}`;
-  const activePreview = previewRunId ? previewReport : report;
-  const previewQuery = (previewRunId ? previewTitle : query).trim();
-  const compactQuery = previewQuery.length > 72 ? `${previewQuery.slice(0, 72)}...` : previewQuery;
   const stagePosition: Record<string, number> = {
     idle: -1,
     outline: 0,
@@ -247,10 +342,36 @@ export default function ResearchPanel({ onRunningChange, pendingQuery, onPending
     error: 2,
   };
   const currentStep = stagePosition[status === 'running' ? stageNow : status] ?? -1;
-  const extractionLine = events
+  const iterativeLine = events
     .slice()
     .reverse()
     .find((e) => ['search', 'summary', 'host', 'reflection'].includes(e.stage))?.message;
+  const iterativeProgress =
+    currentStep < 1
+      ? 0
+      : currentStep >= 2
+        ? 1
+        : Math.min(((currentRound - 1) + (iterativeStageWeight[stageNow] ?? 0.1)) / DISPLAY_ROUNDS, 0.98);
+  const iterativeLogs = events
+    .filter((e) => ['search', 'summary', 'host', 'reflection'].includes(e.stage))
+    .slice(-ITERATIVE_LOG_LIMIT);
+
+  const activePreview = previewRunId ? previewReport : report;
+  const previewQuery = (previewRunId ? previewTitle : query).trim();
+  const copy = PIPELINE_COPY['English (US)'];
+  const visibleHistory = recentExpanded ? history : history.slice(0, RECENT_COLLAPSED_COUNT);
+  const hasMoreHistory = recentExpanded && history.length < historyTotal;
+  const previewTarget = useMemo(
+    () => history.find((h) => h.run_id === previewRunId) || null,
+    [history, previewRunId]
+  );
+  const currentRunTarget = runId ? { run_id: runId, query: query || 'Research query', status } : null;
+  const reportTarget = previewTarget || currentRunTarget;
+
+  const loadMoreHistory = () => {
+    if (history.length >= historyTotal) return;
+    loadHistory(historyPage + 1, true);
+  };
 
   return (
     <section className="panel research-panel">
@@ -259,183 +380,142 @@ export default function ResearchPanel({ onRunningChange, pendingQuery, onPending
         <p className="ui-font">Pose a question; the agent decomposes, searches, critiques, and drafts a report.</p>
       </div>
 
-      <div className="research-input-section">
-        <div className="research-input-wrap">
-          <input
-            className="research-query-input custom-input"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey && status !== 'running') startRun();
-            }}
-            placeholder="What do you want to research?"
-          />
-          <button className="research-start-btn" onClick={startRun} disabled={status === 'running'}>
-            {status === 'running' ? 'Running...' : 'Start Research ↵'}
-          </button>
-        </div>
-      </div>
-
-      {notice && <div className="notice">{notice}</div>}
-
-      <div className="grid-two">
-        <div className="card pipeline-reading-card">
-          <h4 className="section-eyebrow">Pipeline Progress</h4>
-          <div className="pipeline-meta ui-font">
-            <span><strong>Status:</strong> {status}</span>
-            <span><strong>Stage:</strong> {stageNow}</span>
-            {status === 'running' && <span><strong>Elapsed:</strong> {formatElapsed(elapsedSeconds)}</span>}
-            <span className="pipeline-query"><strong>Query Agent:</strong> {compactQuery || 'N/A'}</span>
-          </div>
-          <div className="pipeline-timeline">
-            <div className={`timeline-item ${currentStep > 0 ? 'done' : currentStep === 0 ? 'active' : 'pending'}`}>
-              <h5 style={{ fontFamily: 'var(--font-ui)' }}>Query Decomposition</h5>
-              <p>
-                {currentStep >= 0 ? `Mapped into ${totalParagraphs} analysis segments.` : 'Awaiting run start.'}
-                {currentStep >= 0 && <span className="highlight-mark">Completed</span>}
-              </p>
-            </div>
-            <div className={`timeline-item ${currentStep > 1 ? 'done' : currentStep === 1 ? 'active' : 'pending'}`}>
-              <h5 style={{ fontFamily: 'var(--font-ui)' }}>Deep Web Extraction</h5>
-              <p>{extractionLine || 'Collecting evidence across sources.'}</p>
-              <div className="ink-meter" style={{ marginTop: '8px' }}>
-                <span style={{ width: `${Math.max(progress, 0.05) * 100}%` }} />
-              </div>
-              {currentStep >= 1 && <span className="highlight-mark" style={{ display: 'inline-block', marginTop: '6px', marginLeft: 0 }}>Round {currentRound}/{totalRounds}</span>}
-            </div>
-            <div className={`timeline-item ${currentStep === 2 ? 'active' : currentStep > 2 ? 'done' : 'pending'}`}>
-              <h5 style={{ fontFamily: 'var(--font-ui)' }}>Synthesis & Reporting</h5>
-              <p>{currentStep >= 2 ? 'Composing final narrative and citations.' : 'Waiting for extraction...'}</p>
-            </div>
-          </div>
-          <div className="muted pipeline-label ui-font" style={{ marginTop: '16px' }}>{progressLabel}</div>
-          <div className="log compact-log" id="research-log">
-            {events.slice(-8).map((e, idx) => (
-              <div key={idx} className="log-line">
-                <strong>[{e.stage}]</strong> {e.message}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="card report-card" style={{ padding: '0', background: 'transparent', border: 'none' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
-            <h4 className="section-eyebrow" style={{ margin: 0 }}>Report Preview</h4>
-            <div className="report-toolbar" style={{ margin: 0 }}>
-              <button className="ghost" onClick={() => runId && openReport({ run_id: runId, query, status })} disabled={!runId}>
-                Full Report
+      <div className="research-layout">
+        <div className="research-main">
+          <div className="research-input-section">
+            <div className="research-input-wrap">
+              <input
+                className="research-query-input custom-input"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey && status !== 'running') startRun();
+                }}
+                placeholder="What do you want to research?"
+              />
+              <button className="research-start-btn" onClick={startRun} disabled={status === 'running'}>
+                {status === 'running' ? 'Running...' : 'Start Research ↵'}
               </button>
-              {runId && (
-                <button className="ghost-link" onClick={() => downloadReportPdf(runId)}>
-                  Export PDF
-                </button>
-              )}
-              {previewRunId && (
-                <button className="ghost" onClick={clearPreview}>
-                  Clear
-                </button>
-              )}
             </div>
           </div>
 
-          {previewLoading && <div className="muted">Loading preview...</div>}
-          {!previewLoading && activePreview ? (
-            <div className="report-paper deep-paper">
-              <div className="report-paper-head ui-font">
-                <span style={{ fontFamily: 'var(--font-serif)', fontSize: '14px', fontWeight: 'bold', color: 'var(--text-primary)' }}>{previewQuery || 'Research query'}</span>
-                <span>{new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+          {notice && <div className="notice">{notice}</div>}
+
+          <div className="card pipeline-reading-card">
+            <h4 className="section-eyebrow">{copy.pipelineTitle}</h4>
+            <div className="pipeline-timeline">
+              <div className={`timeline-item ${currentStep > 0 ? 'done' : currentStep === 0 ? 'active' : 'pending'}`}>
+                <h5 style={{ fontFamily: 'var(--font-ui)' }}>{copy.decompositionTitle}</h5>
+                <p>{totalParagraphs > 0 ? copy.decompositionDone(totalParagraphs) : copy.decompositionPending}</p>
+                {currentStep >= 0 && <span className="highlight-mark">{copy.completed}</span>}
               </div>
-              <pre className="report-preview" style={{ fontFamily: 'var(--font-serif)' }}>{markdownToPlainText(activePreview).split('\n').slice(0, 22).join('\n')}</pre>
-              <div className="report-watermark mono">REF: {previewRunId || runId || 'N/A'}</div>
-            </div>
-          ) : (
-            !previewLoading && <div className="muted" style={{ padding: '24px', background: 'var(--bg-sidebar)', border: '1px solid var(--border-color)', borderRadius: '4px' }}>No report yet.</div>
-          )}
-        </div>
-      </div>
 
-      <div className="card history" style={{ marginTop: '32px' }}>
-        <div className="history-head divider-soft pb-2">
-          <h3 style={{ fontFamily: 'var(--font-serif)' }}>Recent Runs ({historyTotal} total)</h3>
-          <div className="history-filters ui-font">
-            <select
-              value={historyStatus}
-              onChange={(e) => setHistoryStatus(e.target.value as 'all' | 'running' | 'done' | 'failed')}
-            >
-              <option value="all">All</option>
-              <option value="running">Running</option>
-              <option value="done">Done</option>
-              <option value="failed">Failed</option>
-            </select>
-            <input
-              value={historyQuery}
-              onChange={(e) => setHistoryQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') loadHistory(1, historyStatus, historyQuery);
-              }}
-              placeholder="Search query..."
-            />
-            <button className="ghost" onClick={() => loadHistory(1, historyStatus, historyQuery)}>
-              Apply
-            </button>
-          </div>
-        </div>
-        <div className="history-grid">
-          {history.map((h) => (
-            <div key={h.run_id} className="history-item clickable" onClick={() => previewFromHistory(h)}>
-              <div>
-                <div className="history-title" style={{ fontFamily: 'var(--font-serif)' }}>{h.query}</div>
-                <div className="muted ui-font">
-                  {h.status}
-                  {h.created_at ? ` | ${new Date(h.created_at).toLocaleString()}` : ''}
+              <div className={`timeline-item ${currentStep > 1 ? 'done' : currentStep === 1 ? 'active' : 'pending'}`}>
+                <h5 style={{ fontFamily: 'var(--font-ui)' }}>{copy.iterativeTitle}</h5>
+                {iterativeLine && <p>{iterativeLine}</p>}
+                {currentStep >= 1 && (
+                  <div className="ink-meter" style={{ marginTop: '8px' }}>
+                    <span style={{ width: `${iterativeProgress * 100}%` }} />
+                  </div>
+                )}
+                {currentStep >= 1 && (
+                  <span className="highlight-mark" style={{ display: 'inline-block', marginTop: '6px', marginLeft: 0 }}>
+                    {copy.roundLabel} {currentRound}/{DISPLAY_ROUNDS}
+                  </span>
+                )}
+                <div className="log compact-log" id="research-log">
+                  {iterativeLogs.length > 0 ? (
+                    iterativeLogs.map((e, idx) => (
+                      <div key={idx} className="log-line">
+                        <strong>[{copy.iterativeStageLabels[e.stage as keyof IterativeLabels] || e.stage}]</strong> {e.message}
+                      </div>
+                    ))
+                  ) : null}
                 </div>
               </div>
-              <div className="history-actions">
-                {h.status === 'failed' && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setQuery(h.query);
-                      startRun();
-                    }}
-                  >
-                    Retry
-                  </button>
+
+              <div className={`timeline-item ${currentStep === 2 ? 'active' : currentStep > 2 ? 'done' : 'pending'}`}>
+                <h5 style={{ fontFamily: 'var(--font-ui)' }}>{copy.synthesisTitle}</h5>
+                {currentStep >= 2 && (
+                  <p>{status === 'running' ? copy.synthesisRunning : copy.synthesisDone}</p>
                 )}
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    openReport(h);
-                  }}
-                >
-                  Full Report
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    downloadReportPdf(h.run_id);
-                  }}
-                >
-                  Export PDF
-                </button>
               </div>
             </div>
-          ))}
-          {history.length === 0 && <div className="muted">No research history yet.</div>}
-        </div>
-        {historyTotal > 10 && (
-          <div className="pagination">
-            <button disabled={historyPage <= 1} onClick={() => loadHistory(historyPage - 1)}>
-              Prev
-            </button>
-            <span>
-              Page {historyPage} / {Math.ceil(historyTotal / 10)}
-            </span>
-            <button disabled={historyPage * 10 >= historyTotal} onClick={() => loadHistory(historyPage + 1)}>
-              Next
-            </button>
           </div>
-        )}
+
+          <div className="card report-card">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+              <h4 className="section-eyebrow" style={{ margin: 0 }}>{copy.reportPreview}</h4>
+              <div className="report-toolbar" style={{ margin: 0 }}>
+                <button className="ghost" onClick={() => reportTarget && openReport(reportTarget)} disabled={!reportTarget}>
+                  Full Report
+                </button>
+                {reportTarget && (
+                  <button className="ghost-link" onClick={() => downloadReportPdf(reportTarget.run_id)}>
+                    Export PDF
+                  </button>
+                )}
+                {previewRunId && (
+                  <button className="ghost" onClick={clearPreview}>
+                    Clear
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {previewLoading && <div className="muted">Loading preview...</div>}
+            {!previewLoading && activePreview ? (
+              <div className="report-paper deep-paper">
+                <div className="report-paper-head ui-font">
+                  <span style={{ fontFamily: 'var(--font-serif)', fontSize: '14px', fontWeight: 'bold', color: 'var(--text-primary)' }}>{previewQuery || 'Research query'}</span>
+                  <span>{new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                </div>
+                <pre className="report-preview" style={{ fontFamily: 'var(--font-serif)' }}>{markdownToPlainText(activePreview).split('\n').slice(0, 22).join('\n')}</pre>
+                <div className="report-watermark mono">REF: {previewRunId || runId || 'N/A'}</div>
+              </div>
+            ) : (
+              !previewLoading && <div className="muted" style={{ padding: '24px', background: 'var(--bg-sidebar)', border: '1px solid var(--border-color)', borderRadius: '4px' }}>No report yet.</div>
+            )}
+          </div>
+        </div>
+
+        <aside className="research-rail">
+          <div className="card recent-runs-collapsible">
+            <div className="recent-runs-head">
+              <h4 className="section-eyebrow" style={{ margin: 0 }}>
+                {copy.recentRuns} ({historyTotal})
+              </h4>
+            </div>
+
+            <div className="source-list recent-runs-list">
+              {visibleHistory.map((h) => (
+                <button
+                  type="button"
+                  key={h.run_id}
+                  className={`source-item brief-history-item recent-run-item ${previewRunId === h.run_id ? 'active' : ''}`}
+                  onClick={() => previewFromHistory(h)}
+                >
+                  <div className="recent-run-main">
+                    <div className="recent-run-title" style={{ fontFamily: 'var(--font-serif)' }}>{h.query}</div>
+                    <div className="source-meta ui-font">{formatRunTimestamp(h)}</div>
+                  </div>
+                </button>
+              ))}
+              {history.length === 0 && <div className="muted">{copy.noHistory}</div>}
+            </div>
+
+            <div className="recent-runs-footer">
+              {hasMoreHistory && (
+                <button className="ghost" onClick={loadMoreHistory}>
+                  {copy.loadMore}
+                </button>
+              )}
+              <button className="ghost" onClick={() => setRecentExpanded((prev) => !prev)}>
+                {recentExpanded ? copy.collapse : copy.expand}
+              </button>
+            </div>
+          </div>
+        </aside>
       </div>
 
       {isReportOpen && (

@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useState } from 'react';
 import { apiFetch, Topic, SystemStatus, RssHealthEntry, AppConfig, getTopicColor, toCsv } from './api';
@@ -17,7 +17,7 @@ type RunStat = {
   started_at: string;
 };
 
-/* ── Reusable list-of-inputs editor ─────────────────────────── */
+/* 鈹€鈹€ Reusable list-of-inputs editor 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ */
 
 function ListEditor({
   items,
@@ -68,10 +68,11 @@ function ListEditor({
   );
 }
 
-/* ── Main component ─────────────────────────────────────────── */
+/* 鈹€鈹€ Main component 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ */
 
 export default function SettingsPanel({ topics, onTopicsChange }: Props) {
   const showDeveloperPanels = process.env.NEXT_PUBLIC_SHOW_DEV_PANELS === '1';
+  const allowAdminActions = process.env.NEXT_PUBLIC_ARCBRIEF_ENABLE_ADMIN_ACTIONS !== '0';
 
   // Create form state (arrays, not comma strings)
   const [topicName, setTopicName] = useState('');
@@ -104,17 +105,27 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
   const [configSaving, setConfigSaving] = useState(false);
   const [runStats, setRunStats] = useState<RunStat[]>([]);
   const [runStatsTopicId, setRunStatsTopicId] = useState<number | null>(null);
+  const [regenRunning, setRegenRunning] = useState(false);
+
+  const refreshSystemStatus = async () => {
+    try {
+      const res = await apiFetch('/system/status');
+      if (!res.ok) return;
+      const data = await res.json();
+      setSystemStatus(data);
+    } catch {}
+  };
 
   useEffect(() => {
-    if (showDeveloperPanels) {
-      apiFetch('/system/status').then(r => r.ok ? r.json() : null).then(d => d && setSystemStatus(d)).catch(() => {});
+    refreshSystemStatus();
+    if (allowAdminActions) {
+      apiFetch('/rss-health').then(r => r.ok ? r.json() : null).then(d => d && setRssHealth(d.sources || [])).catch(() => {});
+      apiFetch('/config').then(r => r.ok ? r.json() : null).then(d => d && setAppConfig(d)).catch(() => {});
     }
-    apiFetch('/rss-health').then(r => r.ok ? r.json() : null).then(d => d && setRssHealth(d.sources || [])).catch(() => {});
-    apiFetch('/config').then(r => r.ok ? r.json() : null).then(d => d && setAppConfig(d)).catch(() => {});
-  }, [showDeveloperPanels]);
+  }, [allowAdminActions, showDeveloperPanels]);
 
   useEffect(() => {
-    if (!showDeveloperPanels) return;
+    if (!showDeveloperPanels || !allowAdminActions) return;
     if (topics.length === 0) {
       setRunStatsTopicId(null);
       return;
@@ -122,16 +133,16 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
     if (!runStatsTopicId || !topics.some((topic) => topic.id === runStatsTopicId)) {
       setRunStatsTopicId(topics[0].id);
     }
-  }, [topics, runStatsTopicId, showDeveloperPanels]);
+  }, [topics, runStatsTopicId, showDeveloperPanels, allowAdminActions]);
 
   useEffect(() => {
-    if (!showDeveloperPanels) return;
+    if (!showDeveloperPanels || !allowAdminActions) return;
     if (!runStatsTopicId) return;
     apiFetch(`/topics/${runStatsTopicId}/run-stats`)
       .then((r) => (r.ok ? r.json() : []))
       .then((data) => setRunStats(Array.isArray(data) ? data : []))
       .catch(() => setRunStats([]));
-  }, [runStatsTopicId, showDeveloperPanels]);
+  }, [runStatsTopicId, showDeveloperPanels, allowAdminActions]);
 
   const clean = (arr: string[]) => arr.map(s => s.trim()).filter(Boolean);
   const orderedTopics = [...topics].sort(
@@ -139,6 +150,10 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
   );
 
   const createTopic = async () => {
+    if (!allowAdminActions) {
+      setNotice('Admin actions are disabled in public demo mode.');
+      return;
+    }
     if (!topicName.trim()) { setNotice('Please enter a topic name.'); return; }
     setNotice('');
     try {
@@ -166,6 +181,10 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
   };
 
   const deleteTopic = async (topicId: number) => {
+    if (!allowAdminActions) {
+      setNotice('Admin actions are disabled in public demo mode.');
+      return;
+    }
     if (!confirm('Delete this topic?')) return;
     try {
       await apiFetch(`/topics/${topicId}`, { method: 'DELETE' });
@@ -184,6 +203,10 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
   };
 
   const saveEdit = async () => {
+    if (!allowAdminActions) {
+      setNotice('Admin actions are disabled in public demo mode.');
+      return;
+    }
     if (!editingTopic) return;
     const payload: Record<string, unknown> = {};
     if (editName.trim() !== editingTopic.name) payload.name = editName.trim();
@@ -208,6 +231,10 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
   };
 
   const toggleTopicActive = async (topic: Topic) => {
+    if (!allowAdminActions) {
+      setNotice('Admin actions are disabled in public demo mode.');
+      return;
+    }
     setNotice('');
     try {
       const res = await apiFetch(`/topics/${topic.id}`, {
@@ -227,6 +254,10 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
   };
 
   const saveConfig = async () => {
+    if (!allowAdminActions) {
+      setNotice('Admin actions are disabled in public demo mode.');
+      return;
+    }
     if (!appConfig) return;
     setConfigSaving(true);
     setNotice('');
@@ -243,11 +274,33 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
       }
       const data = await res.json();
       if (data?.config) setAppConfig(data.config);
+      await refreshSystemStatus();
       setNotice('Configuration saved.');
     } catch {
       setNotice('Configuration update failed.');
     }
     setConfigSaving(false);
+  };
+
+  const regenerateTodayBriefs = async () => {
+    if (!allowAdminActions) {
+      setNotice('Admin actions are disabled in public demo mode.');
+      return;
+    }
+    setRegenRunning(true);
+    setNotice('');
+    try {
+      const res = await apiFetch('/topics/brief_all', { method: 'POST' });
+      if (!res.ok) {
+        setNotice('Failed to regenerate today briefs.');
+        setRegenRunning(false);
+        return;
+      }
+      setNotice('Today briefs regenerated. Language setting applies to newly generated briefs.');
+    } catch {
+      setNotice('Failed to regenerate today briefs.');
+    }
+    setRegenRunning(false);
   };
 
   return (
@@ -256,11 +309,18 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
         <h2>Agent Protocol</h2>
         <p className="ui-font">System configuration and collection directives.</p>
       </div>
+      {!allowAdminActions && (
+        <div className="card" style={{ marginBottom: '12px' }}>
+          <div className="muted">
+            Write operations are disabled (public demo mode). To enable locally: set <code>NEXT_PUBLIC_ARCBRIEF_ENABLE_ADMIN_ACTIONS=1</code> in <code>frontend/.env.local</code>, or remove the variable entirely. For production, update the value in Vercel Environment Variables.
+          </div>
+        </div>
+      )}
 
       <div className="settings-section">
         <h3 className="settings-section-title">Intelligence Scope</h3>
         <div className="grid-two settings-grid-scope">
-          {/* ── Left: Focus Topics ──────────────────────── */}
+          {/* 鈹€鈹€ Left: Focus Topics 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ */}
           <div className="card settings-scope-focus">
             <h3>Focus Topics</h3>
             <div className="topic-list settings-topic-list">
@@ -271,7 +331,7 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
                 return (
                   <div key={topic.id} className={`topic-card ${topic.is_active ? '' : 'topic-card-inactive'}`} style={{ borderLeftColor: color.border }}>
                     {isEditing ? (
-                      /* ── Edit mode ── */
+                      /* 鈹€鈹€ Edit mode 鈹€鈹€ */
                       <div className="form topic-edit-form" style={{ flex: 1, gap: '10px' }}>
                         <label>
                           Name
@@ -315,7 +375,7 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
                         </div>
                       </div>
                     ) : (
-                      /* ── View mode ── */
+                      /* 鈹€鈹€ View mode 鈹€鈹€ */
                       <>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div className="topic-name">{topic.name}</div>
@@ -337,7 +397,7 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
                               className="source-count-toggle"
                               onClick={() => setExpandedTopicSources(isSourcesExpanded ? null : topic.id)}
                             >
-                              {topic.rss_sources.length} RSS sources {isSourcesExpanded ? '▾' : '▸'}
+                              {topic.rss_sources.length} RSS sources {isSourcesExpanded ? '▲' : '▼'}
                             </span>
                             {' | '} every {topic.scrape_frequency_hours}h {' | '} push {topic.push_time}
                           </div>
@@ -349,17 +409,19 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
                             </div>
                           )}
                         </div>
-                        <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
-                          <button
-                            className="delete-btn"
-                            onClick={() => toggleTopicActive(topic)}
-                            title={topic.is_active ? 'Pause this topic' : 'Enable this topic'}
-                          >
-                            {topic.is_active ? 'II' : '▶'}
-                          </button>
-                          <button className="delete-btn" style={{ borderColor: color.border, color: color.text }} onClick={() => startEdit(topic)}>&#9998;</button>
-                          <button className="delete-btn" onClick={() => deleteTopic(topic.id)}>&times;</button>
-                        </div>
+                        {allowAdminActions && (
+                          <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
+                            <button
+                              className="delete-btn"
+                              onClick={() => toggleTopicActive(topic)}
+                              title={topic.is_active ? 'Pause this topic' : 'Enable this topic'}
+                            >
+                              {topic.is_active ? 'II' : '▶'}
+                            </button>
+                            <button className="delete-btn" style={{ borderColor: color.border, color: color.text }} onClick={() => startEdit(topic)}>&#9998;</button>
+                            <button className="delete-btn" onClick={() => deleteTopic(topic.id)}>&times;</button>
+                          </div>
+                        )}
                       </>
                     )}
                   </div>
@@ -369,9 +431,12 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
             </div>
           </div>
 
-          {/* ── Right: Topic Intake ─────────────────────── */}
+          {/* 鈹€鈹€ Right: Topic Intake 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ */}
           <div className="card settings-scope-intake">
             <h3>Topic Intake</h3>
+            {!allowAdminActions ? (
+              <div className="muted">Topic intake is disabled in public demo mode.</div>
+            ) : (
             <div className="form">
               <label>Name *<input value={topicName} onChange={e => setTopicName(e.target.value)} placeholder="e.g., AI Daily" /></label>
 
@@ -409,6 +474,7 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
               <button className="paper-primary-btn" onClick={createTopic}>Create Topic</button>
               {notice && <div className="notice">{notice}</div>}
             </div>
+            )}
           </div>
         </div>
       </div>
@@ -460,9 +526,11 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
                   <option>Critique-heavy (Skeptic)</option>
                 </select>
               </label>
-              <button className="paper-primary-btn" onClick={saveConfig} disabled={configSaving} style={{ marginTop: '14px' }}>
-                {configSaving ? 'Saving...' : 'Save Behavior & Watchlist'}
-              </button>
+              {allowAdminActions && (
+                <button className="paper-primary-btn" onClick={saveConfig} disabled={configSaving} style={{ marginTop: '14px' }}>
+                  {configSaving ? 'Saving...' : 'Save Behavior & Watchlist'}
+                </button>
+              )}
             </>
           )}
         </div>
@@ -474,7 +542,7 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
         <div className="card">
           <div className="inline">
             <label>
-              Report Language
+              Report Output Language
               <select
                 value={appConfig.report_language}
                 onChange={(e) => setAppConfig({ ...appConfig, report_language: e.target.value })}
@@ -483,6 +551,9 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
                 <option>Chinese (Simplified)</option>
                 <option>Japanese</option>
               </select>
+              <span className="muted" style={{ fontSize: '0.78em', display: 'block', marginTop: '4px' }}>
+                Affects all AI output: briefs, research reports, and chat replies.
+              </span>
             </label>
             <label>
               Primary LLM Model
@@ -497,6 +568,9 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
                 <option>Claude 3.5 Sonnet (Anthropic)</option>
                 <option>Gemini 1.5 Pro (Google)</option>
               </select>
+              <span className="muted" style={{ fontSize: '0.78em', display: 'block', marginTop: '4px' }}>
+                Backend model for all AI tasks. Requires matching API key.
+              </span>
             </label>
           </div>
           <div className="inline" style={{ marginTop: '14px' }}>
@@ -507,18 +581,50 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
                 onChange={(e) => setAppConfig({ ...appConfig, search_provider: e.target.value })}
               >
                 <option>Tavily Search API</option>
-                <option>Serper (Google)</option>
-                <option>Bing Search</option>
+                <option>Bocha Search</option>
+                <option>Zhipu Web Search</option>
+                <option>Volcano Engine</option>
+                <option>Exa Search</option>
               </select>
+              <span className="muted" style={{ fontSize: '0.78em', display: 'block', marginTop: '4px' }}>
+                Provider for research-stage web retrieval. Strict mode fails the run when provider is unavailable.
+              </span>
             </label>
             <label>
               API Key Status
               <input value="Managed by environment variables" disabled />
+              <span className="muted" style={{ fontSize: '0.78em', display: 'block', marginTop: '4px' }}>
+                Configure provider keys in backend environment variables.
+              </span>
             </label>
           </div>
-          <button className="paper-primary-btn" onClick={saveConfig} disabled={configSaving} style={{ marginTop: '14px' }}>
-            {configSaving ? 'Saving...' : 'Save Configuration'}
-          </button>
+          <div className="muted" style={{ marginTop: '10px' }}>
+            Language setting only affects newly generated briefs. Existing briefs keep their original language.
+          </div>
+          {allowAdminActions && (
+            <button className="ghost" onClick={regenerateTodayBriefs} disabled={regenRunning} style={{ marginTop: '8px' }}>
+              {regenRunning ? 'Regenerating...' : 'Regenerate Today Briefs'}
+            </button>
+          )}
+          {systemStatus && (
+            <div style={{ marginTop: '14px', borderTop: '1px solid var(--border-color)', paddingTop: '10px' }}>
+              <h4 style={{ margin: '0 0 6px 0' }}>Search Diagnostics</h4>
+              <div className="muted" style={{ fontSize: '0.86em', lineHeight: 1.6 }}>
+                <div>Configured provider: <strong>{appConfig?.search_provider || systemStatus.search_provider_configured || 'N/A'}</strong></div>
+                <div>Effective provider: <strong>{systemStatus.search_provider_effective || 'N/A'}</strong></div>
+                <div>Unavailable reason: {systemStatus.search_provider_fallback || 'None'}</div>
+                <div>LLM-assisted search: {systemStatus.search_llm_assisted ? 'Yes' : 'No'}</div>
+              </div>
+              <div className="muted" style={{ fontSize: '0.78em', marginTop: '6px' }}>
+                Diagnostics are computed from current configuration and environment in real time.
+              </div>
+            </div>
+          )}
+          {allowAdminActions && (
+            <button className="paper-primary-btn" onClick={saveConfig} disabled={configSaving} style={{ marginTop: '14px' }}>
+              {configSaving ? 'Saving...' : 'Save Configuration'}
+            </button>
+          )}
         </div>
       )}
 
@@ -567,7 +673,7 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
         </div>
       )}
 
-      {showDeveloperPanels && systemStatus && (
+      {allowAdminActions && showDeveloperPanels && systemStatus && (
         <div className="card" style={{ marginTop: '1rem' }}>
           <h3>Runtime Diagnostics</h3>
           <p className="muted ui-font" style={{ margin: '0 0 10px' }}>
@@ -597,7 +703,7 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
         </div>
       )}
 
-      {showDeveloperPanels && orderedTopics.length > 0 && (
+      {allowAdminActions && showDeveloperPanels && orderedTopics.length > 0 && (
         <div className="card" style={{ marginTop: '1rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h3>Execution History</h3>

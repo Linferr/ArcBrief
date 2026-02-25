@@ -846,6 +846,214 @@ def _item_sort_key(
     return time_score * 0.7 + rep_score * 0.3
 
 
+def _brief_locale(language: str) -> Dict[str, str]:
+    if language == "Chinese (Simplified)":
+        return {
+            "doc_title": "每日简报",
+            "core": "📌 今日核心 (TL;DR)",
+            "clusters": "📂 专题速递",
+            "insights": "💡 趋势与洞察",
+            "sources": "来源索引",
+            "summary_line": "一句话总结",
+            "insight_trend": "趋势提炼",
+            "insight_risk": "风险/机会",
+            "empty": "暂无足够高质量素材，建议稍后重试。",
+            "trend_default": "近期高信号信息主要集中在该主题的关键动作与落地执行。",
+            "risk_default": "来源重叠可能带来盲区，建议继续补充一手社区证据。",
+        }
+    if language == "Japanese":
+        return {
+            "doc_title": "デイリーブリーフ",
+            "core": "📌 今日の要点 (TL;DR)",
+            "clusters": "📂 テーマ別クラスター",
+            "insights": "💡 インサイト",
+            "sources": "ソース索引",
+            "summary_line": "一文要約",
+            "insight_trend": "トレンド",
+            "insight_risk": "リスク/機会",
+            "empty": "十分な高品質ソースがありません。時間を置いて再実行してください。",
+            "trend_default": "最近の高シグナル情報はこのテーマの実行可能な変化に集中しています。",
+            "risk_default": "情報源の重複により盲点が生まれる可能性があります。",
+        }
+    return {
+        "doc_title": "Daily Brief",
+        "core": "📌 Core TL;DR",
+        "clusters": "📂 Thematic Clusters",
+        "insights": "💡 Insights",
+        "sources": "Sources",
+        "summary_line": "One-line summary",
+        "insight_trend": "Trend",
+        "insight_risk": "Risk/Opportunity",
+        "empty": "Insufficient high-signal material. Please retry later.",
+        "trend_default": "High-signal updates are concentrated on practical execution changes in this topic.",
+        "risk_default": "Source overlap may hide dissenting evidence and edge-case failures.",
+    }
+
+
+def _ranked_unique_items(
+    clusters: Dict[str, List[Dict[str, Any]]],
+    source_weights: Optional[Dict[str, float]],
+    limit: int = 36,
+) -> List[Tuple[str, Dict[str, Any]]]:
+    ranked: List[Tuple[str, Dict[str, Any]]] = []
+    seen: set[str] = set()
+    sorted_clusters = sorted(
+        clusters.items(),
+        key=lambda kv: _cluster_sort_key(kv[1], source_weights),
+        reverse=True,
+    )
+    for label, items in sorted_clusters:
+        for item in sorted(items, key=lambda x: _item_sort_key(x, source_weights), reverse=True):
+            url = (item.get("url") or "").strip()
+            title = (item.get("title") or "").strip()
+            dedupe_key = url or f"{label}:{title}"
+            if not dedupe_key or dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            ranked.append((label, item))
+            if len(ranked) >= max(1, limit):
+                return ranked
+    return ranked
+
+
+def _build_source_entries(
+    ranked_items: List[Tuple[str, Dict[str, Any]]],
+) -> Tuple[List[Dict[str, str]], Dict[str, str]]:
+    entries: List[Dict[str, str]] = []
+    key_to_cid: Dict[str, str] = {}
+    for idx, (_label, item) in enumerate(ranked_items, start=1):
+        cid = f"C{idx}"
+        url = (item.get("url") or "").strip()
+        title = (item.get("title") or "Untitled").strip()
+        source = _extract_domain(item.get("source") or url or "")
+        published = (item.get("published_at") or item.get("created_at") or "").strip()
+        content = _pick_best_item_text(item, "source")
+        entry = {
+            "cid": cid,
+            "title": title,
+            "url": url,
+            "source": source,
+            "published_at": published,
+            "content": _truncate_words(content, 120),
+        }
+        entries.append(entry)
+        if url:
+            key_to_cid[url] = cid
+    return entries, key_to_cid
+
+
+def _build_v3_system_prompt(language: str, app_config: Optional[Dict[str, Any]]) -> str:
+    locale = _brief_locale(language)
+    dynamic_instruction = _build_dynamic_instruction(app_config, language)
+    return (
+        "Role: You are a senior intelligence analyst. Transform fragmented updates into a dense, practical brief.\n\n"
+        "Core principles:\n"
+        "1) Dynamic clustering: infer 3-4 key themes from source similarity; do not hardcode categories.\n"
+        "2) High signal density: prefer entities, metrics, dates, actions, and consequences.\n"
+        "3) Deduplication: merge repeated reporting of the same event, keep the most complete details.\n"
+        "4) Attribution: every claim must cite source ids as (C1) or (C2, C5).\n"
+        "5) Rendering: use concise bullets, bold key terms, and thematic emoji in cluster titles.\n"
+        "6) Preserve source titles verbatim in original language. Do not translate source titles.\n\n"
+        f"{dynamic_instruction}\n\n"
+        "Output format (strict markdown):\n"
+        f"## {locale['core']}\n"
+        f"> **{locale['summary_line']}**: [<= 80 words summary with impact] (C#)\n\n"
+        f"## {locale['clusters']}\n"
+        "### [Emoji] [Auto-generated cluster title]\n"
+        "- **[Key actor/action]**: ... (C#)\n"
+        "- **[Data/details]**: ... (C#)\n\n"
+        f"## {locale['insights']}\n"
+        f"- **{locale['insight_trend']}**: ... (C#)\n"
+        f"- **{locale['insight_risk']}**: ... (C#)\n\n"
+        "Return markdown only."
+    )
+
+
+def _build_v3_fallback_markdown(
+    topic_name: str,
+    ranked_items: List[Tuple[str, Dict[str, Any]]],
+    source_entries: List[Dict[str, str]],
+    source_ref_map: Dict[str, str],
+    language: str,
+) -> str:
+    locale = _brief_locale(language)
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    lines: List[str] = [f"# {date_str} {topic_name} {locale['doc_title']}", ""]
+
+    if not ranked_items:
+        lines.append(f"## {locale['core']}")
+        lines.append("")
+        lines.append(f"> **{locale['summary_line']}**: {locale['empty']}")
+        lines.append("")
+        lines.append(f"## {locale['sources']}")
+        lines.append("")
+        lines.append("- (C0) No source items collected.")
+        return "\n".join(lines).strip() + "\n"
+
+    lines.append(f"## {locale['core']}")
+    lines.append("")
+    top_title = (ranked_items[0][1].get("title") or "").strip() or topic_name
+    top_url = (ranked_items[0][1].get("url") or "").strip()
+    top_ref = source_ref_map.get(top_url, "C1")
+    lines.append(f"> **{locale['summary_line']}**: **{top_title}** ({top_ref})")
+    lines.append("")
+
+    lines.append(f"## {locale['clusters']}")
+    lines.append("")
+    clusters: Dict[str, List[Dict[str, Any]]] = {}
+    for label, item in ranked_items:
+        clusters.setdefault(label or "General", []).append(item)
+    emoji_pool = ["🚀", "💼", "⚖️", "🧪", "🌐", "📈"]
+    for idx, (label, items) in enumerate(list(clusters.items())[:4]):
+        emoji = emoji_pool[idx % len(emoji_pool)]
+        lines.append(f"### {emoji} {label}")
+        for item in items[:2]:
+            title = (item.get("title") or "Untitled").strip()
+            body = _truncate_words(_pick_best_item_text(item, label), 50)
+            url = (item.get("url") or "").strip()
+            ref = source_ref_map.get(url, "C1")
+            lines.append(f"- **{title}**: {body} ({ref})")
+            lines.append("")
+
+    lines.append(f"## {locale['insights']}")
+    lines.append("")
+    lines.append(f"- **{locale['insight_trend']}**: {locale['trend_default']} (C1)")
+    lines.append("")
+    lines.append(f"- **{locale['insight_risk']}**: {locale['risk_default']} (C1)")
+    lines.append("")
+
+    lines.append(f"## {locale['sources']}")
+    lines.append("")
+    for entry in source_entries[:20]:
+        url = entry.get("url") or ""
+        source_suffix = f" [{entry['source']}]" if entry.get("source") else ""
+        date_suffix = f" ({entry['published_at'][:10]})" if entry.get("published_at") else ""
+        if url:
+            lines.append(f"- ({entry['cid']}) {entry['title']}{source_suffix}{date_suffix} - {url}")
+        else:
+            lines.append(f"- ({entry['cid']}) {entry['title']}{source_suffix}{date_suffix}")
+    lines.append("")
+    return "\n".join(lines).strip() + "\n"
+
+
+def _ensure_sources_section(markdown_text: str, source_entries: List[Dict[str, str]], language: str) -> str:
+    locale = _brief_locale(language)
+    text = (markdown_text or "").strip()
+    if not text:
+        text = ""
+    if f"## {locale['sources']}" in text:
+        return text + ("\n" if not text.endswith("\n") else "")
+    lines = [text, "", f"## {locale['sources']}", ""]
+    for entry in source_entries[:20]:
+        url = entry.get("url") or ""
+        if url:
+            lines.append(f"- ({entry['cid']}) {entry['title']} - {url}")
+        else:
+            lines.append(f"- ({entry['cid']}) {entry['title']}")
+    lines.append("")
+    return "\n".join([line for line in lines if line is not None]).strip() + "\n"
+
+
 def generate_brief_markdown(
     topic_name: str,
     clusters: Dict[str, List[Dict[str, Any]]],
@@ -853,161 +1061,50 @@ def generate_brief_markdown(
     language: str = "English (US)",
     app_config: Optional[Dict[str, Any]] = None,
 ) -> str:
+    language_used = language if language in _LANGUAGE_OUTPUT_HINTS else "English (US)"
+    ranked_items = _ranked_unique_items(clusters, source_weights, limit=32)
+    source_entries, source_ref_map = _build_source_entries(ranked_items)
+
     llm = _get_llm()
-    date_str = datetime.now().strftime("%Y-%m-%d")
-
-    total_items = sum(len(v) for v in clusters.values())
-    source_counts: Dict[str, int] = {}
-    for items in clusters.values():
-        for item in items:
-            source = item.get("source", "") or "unknown"
-            source_counts[source] = source_counts.get(source, 0) + 1
-
-    source_line = " | ".join([f"{k}: {v}" for k, v in source_counts.items()]) if source_counts else "No source stats"
-
-    lines = [
-        f"# {date_str} {topic_name} Daily Brief",
-        "",
-        f"> Total: {total_items} articles",
-        f"> Sources: {source_line}",
-        "",
-        "## TLDR",
-        "",
-    ]
-
-    tldr_topics = list(clusters.keys())[:5]
-    lines.append(" | ".join(tldr_topics) if tldr_topics else "No major topic")
-    lines.append("")
-    lines.append("---")
-    lines.append("")
-
-    sorted_clusters = sorted(
-        clusters.items(),
-        key=lambda kv: _cluster_sort_key(kv[1], source_weights),
-        reverse=True,
-    )
-    max_synthesis_evidence = max(24, min(total_items, 60))
-    synthesis_evidence = _build_synthesis_evidence(
-        sorted_clusters,
-        source_weights,
-        per_cluster=None,
-        max_total=max_synthesis_evidence,
-    )
-
-    all_cluster_briefs: List[Dict[str, Any]] = []
-
-    cluster_lines_buf: List[str] = []
-    for idx, (label, items) in enumerate(sorted_clusters, start=1):
-        items_sorted = sorted(items, key=lambda x: _item_sort_key(x, source_weights), reverse=True)
-
-        cluster_lines_buf.append(f"## {idx}. {label}")
-        cluster_lines_buf.append("")
-        if llm:
-            try:
-                briefs = _summarize_cluster_with_llm(
-                    llm,
-                    label,
-                    items_sorted,
-                    language=language,
-                    app_config=app_config,
-                )
-            except Exception:
-                briefs = _structured_fallback(label, items_sorted)
-        else:
-            briefs = _structured_fallback(label, items_sorted)
-
-        for brief in briefs[:2]:
-            all_cluster_briefs.append(brief)
-            cluster_lines_buf.append(f"### {brief['topic_tag']}")
-            cluster_lines_buf.append(f"**{brief['headline']}**")
-            cluster_lines_buf.append("")
-            cluster_lines_buf.append(brief["summary"])
-            cluster_lines_buf.append("")
-            cluster_lines_buf.append("**Key Takeaways**")
-            for takeaway in brief["key_takeaways"][:2]:
-                cluster_lines_buf.append(f"- {takeaway}")
-            cluster_lines_buf.append("")
-            cluster_lines_buf.append(
-                f"*Sentiment: {brief['sentiment']} | Reliability: {brief['reliability_score']}*"
-            )
-            cluster_lines_buf.append("")
-
-        cluster_lines_buf.append(f"*(Related articles: {len(items_sorted)})*")
-        cluster_lines_buf.append("")
-        cluster_lines_buf.append("---")
-        cluster_lines_buf.append("")
-
-    # Generate cross-cluster synthesis and insert before cluster details
-    if llm and all_cluster_briefs:
+    if llm and ranked_items:
+        system_prompt = _build_v3_system_prompt(language_used, app_config=app_config)
+        payload = {
+            "topic_context": topic_name,
+            "raw_articles_content": [
+                {
+                    "source_id": entry["cid"],
+                    "title": entry["title"],
+                    "url": entry["url"],
+                    "source": entry["source"],
+                    "published_at": entry["published_at"],
+                    "content": entry["content"],
+                }
+                for entry in source_entries
+            ],
+            "source_map": [
+                {
+                    "id": entry["cid"],
+                    "title": entry["title"],
+                    "url": entry["url"],
+                }
+                for entry in source_entries
+            ],
+        }
         try:
-            synthesis = _generate_synthesis(
-                llm,
-                all_cluster_briefs,
-                synthesis_evidence,
-                total_articles=total_items,
-                language=language,
-                app_config=app_config,
-            )
+            raw = llm.invoke(system_prompt, json.dumps(payload, ensure_ascii=False))
+            rendered = (raw or "").strip()
+            if rendered and "##" in rendered:
+                return _ensure_sources_section(rendered, source_entries, language_used)
         except Exception:
-            synthesis = _fallback_synthesis_from_clusters(all_cluster_briefs)
-    elif all_cluster_briefs:
-        synthesis = _fallback_synthesis_from_clusters(all_cluster_briefs)
-    else:
-        synthesis = None
+            pass
 
-    if synthesis:
-        lines.append("## Synthesis")
-        lines.append("")
-        lines.append(f"### {synthesis.get('topic_tag', 'Daily Executive Summary')}")
-        lines.append(f"**{synthesis.get('headline', 'Todays Brief')}**")
-        lines.append("")
-        lines.append(synthesis.get("summary", ""))
-        lines.append("")
-        lines.append("**Key Takeaways**")
-        for tk in (synthesis.get("key_takeaways") or [])[:12]:
-            lines.append(f"- {tk}")
-        refs = synthesis.get("evidence_refs") or []
-        if refs:
-            lines.append("")
-            lines.append(f"*Evidence refs: {', '.join(refs[:12])}*")
-        lines.append("")
-        lines.append(
-            f"*Sentiment: {synthesis.get('sentiment', 'neutral')} | Reliability: {synthesis.get('reliability_score', 'med')}*"
-        )
-        lines.append("")
-        lines.append("---")
-        lines.append("")
-
-    lines.extend(cluster_lines_buf)
-
-    lines.append("## Sources")
-    lines.append("")
-    seen_urls: set[str] = set()
-    for items in clusters.values():
-        for item in sorted(
-            items,
-            key=lambda x: x.get("published_at") or x.get("created_at") or "",
-            reverse=True,
-        ):
-            url = item.get("url", "")
-            if not url or url in seen_urls:
-                continue
-            seen_urls.add(url)
-            title = item.get("title", "Untitled")
-            ts = item.get("published_at") or item.get("created_at") or ""
-            ts_source = "published_at" if item.get("published_at") else "fallback(created_at)"
-            source = item.get("source", "")
-            ts_display = f" ({ts[:10]})" if ts else ""
-            source_display = f" [{source}]" if source else ""
-            time_source_display = f" [{ts_source}]"
-            lines.append(f"- {title}{source_display}{ts_display}{time_source_display}")
-            if len(seen_urls) >= 20:
-                break
-        if len(seen_urls) >= 20:
-            break
-    lines.append("")
-
-    return "\n".join(lines)
+    return _build_v3_fallback_markdown(
+        topic_name,
+        ranked_items,
+        source_entries,
+        source_ref_map,
+        language_used,
+    )
 
 
 def build_brief_for_topic(
@@ -1029,6 +1126,8 @@ def build_brief_for_topic(
     watchlist_raw = cfg.get("entity_watchlist", "")
     watchlist = [w.strip() for w in watchlist_raw.split(",") if w.strip()] if watchlist_raw else []
     language = cfg.get("report_language", "English (US)")
+    if language not in _LANGUAGE_OUTPUT_HINTS:
+        language = "English (US)"
 
     clusters = cluster_by_keywords(items, topic.keywords, watchlist=watchlist)
     return generate_brief_markdown(

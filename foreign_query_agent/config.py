@@ -34,7 +34,18 @@ class Settings:
     llm_base_url: str = os.getenv("FQ_LLM_BASE_URL", "")
     llm_model: str = os.getenv("FQ_LLM_MODEL", "gpt-4o-mini")
 
+    search_provider: str = os.getenv("ARCBRIEF_SEARCH_PROVIDER", "Tavily Search API")
+    research_strict_provider: bool = os.getenv("ARCBRIEF_RESEARCH_STRICT_PROVIDER", "1") == "1"
+    research_recency_mode: str = os.getenv("ARCBRIEF_RESEARCH_RECENCY_MODE", "recent_12m_with_90d_anchor")
     tavily_api_key: str = os.getenv("TAVILY_API_KEY", "")
+    bocha_api_key: str = os.getenv("BOCHA_API_KEY", "")
+    zhipu_api_key: str = os.getenv("ZHIPU_API_KEY", "")
+    zhipu_openai_base_url: str = os.getenv("ZHIPU_OPENAI_BASE_URL", "https://open.bigmodel.cn/api/paas/v4/")
+    zhipu_web_search_model: str = os.getenv("ZHIPU_WEB_SEARCH_MODEL", "glm-4-plus")
+    exa_api_key: str = os.getenv("EXA_API_KEY", "")
+    volcengine_api_key: str = os.getenv("VOLCENGINE_API_KEY", "")
+    volcengine_openai_base_url: str = os.getenv("VOLCENGINE_OPENAI_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3")
+    volcengine_model_ep: str = os.getenv("VOLCENGINE_MODEL_EP", "")
 
     max_reflections: int = int(os.getenv("FQ_MAX_REFLECTIONS", "3"))
     max_paragraphs: int = int(os.getenv("FQ_MAX_PARAGRAPHS", "4"))
