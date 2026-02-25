@@ -14,4 +14,3 @@ markdown>=3.5.0
 redis>=5.0.0
 zhipuai>=2.0
 exa-py>=1.0
-volcenginesdkarkruntime>=0.1
