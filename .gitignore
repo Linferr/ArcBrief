@@ -36,3 +36,7 @@ frontend/.next/
 
 # docs
 docs/
+
+arcbrief.db.bak.*
+frontend/tsconfig.tsbuildinfo
+_patch_research.txt
