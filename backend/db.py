@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import json
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
@@ -122,6 +123,33 @@ class ArcBriefDB:
                     started_at TEXT,
                     finished_at TEXT,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS user_ingestions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    url TEXT NOT NULL UNIQUE,
+                    final_url TEXT,
+                    title TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    summary TEXT NOT NULL,
+                    source_domain TEXT,
+                    language_used TEXT,
+                    created_by TEXT DEFAULT 'system',
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS bookmarks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    brief_id INTEGER NOT NULL,
+                    note TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(brief_id) REFERENCES briefs(id),
+                    UNIQUE(user_id, brief_id)
                 )
             """)
             conn.execute("""
@@ -595,6 +623,58 @@ class ArcBriefDB:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def search_articles(self, query: str, topic_id: Optional[int] = None, limit: int = 5, days: int = 7) -> List[Dict[str, Any]]:
+        tokens = [tok.strip() for tok in re.split(r"\s+", query or "") if tok.strip()]
+        if not tokens:
+            return []
+        where_parts = []
+        params: List[Any] = []
+        for token in tokens[:6]:
+            like = f"%{token}%"
+            where_parts.append("(title LIKE ? OR content LIKE ? OR source LIKE ?)")
+            params.extend([like, like, like])
+        cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+        sql = f"""
+            SELECT * FROM articles
+            WHERE {" AND ".join(where_parts)}
+              AND (
+                (published_at IS NOT NULL AND published_at >= ?)
+                OR (published_at IS NULL AND created_at >= ?)
+              )
+        """
+        params.extend([cutoff, cutoff])
+        if topic_id is not None:
+            sql += " AND topic_id = ?"
+            params.append(topic_id)
+        sql += " ORDER BY published_at DESC, created_at DESC LIMIT ?"
+        params.append(limit)
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def search_user_ingestions(self, query: str, limit: int = 5, days: int = 30) -> List[Dict[str, Any]]:
+        tokens = [tok.strip() for tok in re.split(r"\s+", query or "") if tok.strip()]
+        if not tokens:
+            return []
+        where_parts = []
+        params: List[Any] = []
+        for token in tokens[:6]:
+            like = f"%{token}%"
+            where_parts.append("(title LIKE ? OR content LIKE ? OR summary LIKE ? OR source_domain LIKE ?)")
+            params.extend([like, like, like, like])
+        cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+        sql = f"""
+            SELECT * FROM user_ingestions
+            WHERE {" AND ".join(where_parts)}
+              AND updated_at >= ?
+            ORDER BY updated_at DESC
+            LIMIT ?
+        """
+        params.extend([cutoff, limit])
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
     def save_research_run(self, run_id: str, query: str, status: str,
                           language_used: Optional[str] = None,
                           report_path: Optional[str] = None,
@@ -631,6 +711,92 @@ class ArcBriefDB:
                 (run_id,),
             ).fetchone()
         return dict(row) if row else None
+
+    def get_user_ingestion(self, url: str) -> Optional[Dict[str, Any]]:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM user_ingestions WHERE url = ? OR final_url = ? ORDER BY updated_at DESC LIMIT 1",
+                (url, url),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def save_user_ingestion(
+        self,
+        *,
+        url: str,
+        final_url: Optional[str],
+        title: str,
+        content: str,
+        summary: str,
+        source_domain: str,
+        language_used: str,
+        created_by: str = "system",
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO user_ingestions
+                (url, final_url, title, content, summary, source_domain, language_used, created_by, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(url) DO UPDATE SET
+                  final_url = excluded.final_url,
+                  title = excluded.title,
+                  content = excluded.content,
+                  summary = excluded.summary,
+                  source_domain = excluded.source_domain,
+                  language_used = excluded.language_used,
+                  created_by = excluded.created_by,
+                  updated_at = CURRENT_TIMESTAMP
+                """,
+                (url, final_url, title, content, summary, source_domain, language_used, created_by),
+            )
+
+    def save_bookmark(self, user_id: str, brief_id: int, note: Optional[str] = None) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO bookmarks (user_id, brief_id, note, updated_at)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(user_id, brief_id) DO UPDATE SET
+                  note = excluded.note,
+                  updated_at = CURRENT_TIMESTAMP
+                """,
+                (user_id, brief_id, note),
+            )
+
+    def list_bookmarks(self, user_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                  bm.id,
+                  bm.user_id,
+                  bm.brief_id,
+                  bm.note,
+                  bm.created_at,
+                  bm.updated_at,
+                  b.topic_id,
+                  b.date,
+                  b.item_count,
+                  t.name AS topic_name
+                FROM bookmarks bm
+                JOIN briefs b ON b.id = bm.brief_id
+                JOIN topics t ON t.id = b.topic_id
+                WHERE bm.user_id = ?
+                ORDER BY datetime(bm.updated_at) DESC, bm.id DESC
+                LIMIT ?
+                """,
+                (user_id, limit),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def delete_bookmark(self, user_id: str, brief_id: int) -> int:
+        with self._connect() as conn:
+            cur = conn.execute(
+                "DELETE FROM bookmarks WHERE user_id = ? AND brief_id = ?",
+                (user_id, brief_id),
+            )
+            return int(cur.rowcount or 0)
 
     def update_topic(self, topic_id: int, fields: Dict[str, Any]) -> None:
         json_fields = {"keywords", "rss_sources", "push_channels"}

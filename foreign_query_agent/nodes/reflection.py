@@ -1,5 +1,6 @@
 """Reflection node."""
 
+from datetime import datetime
 from typing import Dict
 
 from .base import BaseNode
@@ -23,9 +24,10 @@ class ReflectionNode(BaseNode):
             f"{recency_instruction(recency_mode)}"
         )
         raw = self.llm.invoke(system_prompt, payload)
+        current_year = datetime.utcnow().year
         default = {
             "search_queries": [
-                {"intent": "latest_gap", "query": f"{title} latest 90 days 2026"},
+                {"intent": "latest_gap", "query": f"{title} latest 90 days {current_year}"},
                 {"intent": "source_gap", "query": f"{title} github x thread interview"},
                 {"intent": "actionability_gap", "query": f"{title} workflow template config"},
             ],

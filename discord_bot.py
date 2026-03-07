@@ -9,6 +9,18 @@ import aiohttp
 import discord
 from discord import app_commands
 
+from discord_bot_formatting import (
+    format_bookmark_action_message,
+    format_analyze_mobile_message,
+    chunk_text,
+    format_ask_mobile_message,
+    format_brief_mobile_message,
+    format_saved_mobile_message,
+    format_digest_mobile_message,
+    format_research_mobile_message,
+    format_tldr_mobile_message,
+)
+
 
 API_BASE = os.getenv("ARCBRIEF_API_BASE", "http://localhost:8000/api")
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
@@ -42,11 +54,6 @@ async def api_post(path: str, payload: Optional[Dict[str, Any]] = None) -> Any:
             if res.status >= 400:
                 raise RuntimeError(f"POST {path} failed: {res.status}")
             return await res.json()
-
-
-def chunk_text(text: str, size: int = 1800) -> List[str]:
-    return [text[i : i + size] for i in range(0, len(text), size)]
-
 
 class ArcBriefBot(discord.Client):
     def __init__(self):
@@ -119,9 +126,8 @@ async def latest_brief(interaction: discord.Interaction, topic_id: int):
         if not content:
             await interaction.followup.send("No brief content.")
             return
-        await interaction.followup.send(f"**Latest Brief · {brief.get('date','')}**")
-        for chunk in chunk_text(content):
-            await interaction.channel.send(f"```markdown\n{chunk}\n```")
+        message = format_brief_mobile_message(brief)
+        await interaction.followup.send(message)
     except Exception as e:
         await interaction.followup.send(f"Failed to get brief: {e}")
 
@@ -160,9 +166,13 @@ async def research(interaction: discord.Interaction, query: str, lang: Optional[
             await interaction.channel.send("No report content yet.")
             return
 
-        await interaction.channel.send("**Research Report**")
-        for chunk in chunk_text(report):
-            await interaction.channel.send(f"```markdown\n{chunk}\n```")
+        summary = format_research_mobile_message(
+            run_id=run_id,
+            query=query,
+            language=language,
+            report=report,
+        )
+        await interaction.channel.send(summary)
 
     except Exception as e:
         await interaction.followup.send(f"Research failed: {e}")
@@ -201,11 +211,7 @@ async def ask(
 
     try:
         result = await api_post("/chat", {"message": question, "topic_id": topic_id, "language": language})
-        reply = result.get("reply", "No relevant information found.")
-        sources = result.get("sources", [])
-        response = reply
-        if sources:
-            response += f"\n\n*Sources: {', '.join(sources)}*"
+        response = format_ask_mobile_message(result)
     except Exception as e:
         response = f"Error fetching answer: {e}"
 
@@ -228,13 +234,144 @@ async def digest(interaction: discord.Interaction):
         if not seen:
             await interaction.followup.send("No briefs available yet.")
             return
-        lines = [
-            f"**{b['topic_name']}** ({b.get('date', 'N/A')})"
-            for b in seen.values()
-        ]
-        await interaction.followup.send("\n".join(lines))
+        message = format_digest_mobile_message(list(seen.values()))
+        await interaction.followup.send(message)
     except Exception as e:
         await interaction.followup.send(f"Error: {e}")
+
+
+@bot.tree.command(name="tldr", description="Fetch a URL and return a mobile-friendly summary")
+@app_commands.describe(url="Public article URL", lang="Output language (optional)")
+@app_commands.choices(
+    lang=[
+        app_commands.Choice(name="English", value="en"),
+        app_commands.Choice(name="中文", value="zh"),
+        app_commands.Choice(name="日本語", value="ja"),
+    ]
+)
+async def tldr(
+    interaction: discord.Interaction,
+    url: str,
+    lang: Optional[app_commands.Choice[str]] = None,
+):
+    await interaction.response.defer(thinking=True)
+    try:
+        language = await resolve_output_language(lang.value if lang else None)
+        result = await api_post(
+            "/tldr",
+            {
+                "url": url,
+                "language": language,
+                "created_by": f"discord:{interaction.user.id}",
+            },
+        )
+        await interaction.followup.send(format_tldr_mobile_message(result))
+    except Exception as e:
+        await interaction.followup.send(f"TL;DR failed: {e}")
+
+
+@bot.tree.command(name="analyze", description="Run a PM-style product or company analysis")
+@app_commands.describe(product="Product / company / initiative to analyze", lang="Output language (optional)")
+@app_commands.choices(
+    lang=[
+        app_commands.Choice(name="English", value="en"),
+        app_commands.Choice(name="中文", value="zh"),
+        app_commands.Choice(name="日本語", value="ja"),
+    ]
+)
+async def analyze(
+    interaction: discord.Interaction,
+    product: str,
+    lang: Optional[app_commands.Choice[str]] = None,
+):
+    await interaction.response.defer(thinking=True)
+    try:
+        language = await resolve_output_language(lang.value if lang else None)
+        run = await api_post("/analyze", {"product": product, "language": language})
+        run_id = run.get("run_id")
+        if not run_id:
+            await interaction.followup.send("Failed to start analysis.")
+            return
+
+        await interaction.followup.send(f"Started analysis: `{run_id}` ({language}). Polling for completion...")
+
+        report = ""
+        for _ in range(180):
+            status = await api_get(f"/status/{run_id}")
+            if status.get("report_content"):
+                report = status.get("report_content", "")
+            if status.get("status") == "done":
+                break
+            await asyncio.sleep(2)
+
+        if not report:
+            await interaction.channel.send("No analysis content yet.")
+            return
+
+        summary = format_analyze_mobile_message(
+            run_id=run_id,
+            subject=product,
+            language=language,
+            report=report,
+        )
+        await interaction.channel.send(summary)
+
+    except Exception as e:
+        await interaction.followup.send(f"Analyze failed: {e}")
+
+
+@bot.tree.command(name="save", description="Save a brief for later review")
+@app_commands.describe(brief_id="Brief ID to save", note="Optional note")
+async def save_brief(
+    interaction: discord.Interaction,
+    brief_id: int,
+    note: Optional[str] = None,
+):
+    await interaction.response.defer(thinking=True)
+    try:
+        result = await api_post(
+            "/bookmarks",
+            {
+                "user_id": f"discord:{interaction.user.id}",
+                "brief_id": brief_id,
+                "note": note,
+            },
+        )
+        await interaction.followup.send(
+            format_bookmark_action_message(result.get("status", "saved"), brief_id=brief_id, note=note)
+        )
+    except Exception as e:
+        await interaction.followup.send(f"Save failed: {e}")
+
+
+@bot.tree.command(name="saved", description="List your saved briefs")
+async def saved_briefs(interaction: discord.Interaction):
+    await interaction.response.defer(thinking=True)
+    try:
+        result = await api_get(f"/bookmarks/discord:{interaction.user.id}")
+        await interaction.followup.send(format_saved_mobile_message(result.get("items", [])))
+    except Exception as e:
+        await interaction.followup.send(f"Load saved briefs failed: {e}")
+
+
+@bot.tree.command(name="unsave", description="Remove a saved brief")
+@app_commands.describe(brief_id="Brief ID to remove from saved items")
+async def unsave_brief(interaction: discord.Interaction, brief_id: int):
+    await interaction.response.defer(thinking=True)
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.delete(
+                f"{API_BASE}/bookmarks/discord:{interaction.user.id}/{brief_id}",
+                headers={"X-API-Key": API_KEY},
+            ) as res:
+                if res.status >= 400:
+                    raise RuntimeError(f"DELETE /bookmarks failed: {res.status}")
+                result = await res.json()
+        await interaction.followup.send(
+            format_bookmark_action_message(result.get("status", "deleted"), brief_id=brief_id)
+        )
+    except Exception as e:
+        await interaction.followup.send(f"Unsave failed: {e}")
 
 
 def main():

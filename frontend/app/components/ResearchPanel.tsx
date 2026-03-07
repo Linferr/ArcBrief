@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { apiFetch, downloadPdfResponse, markdownToPlainText, readErrorMessage, RunEvent, RunSummary } from './api';
+import { apiFetch, downloadPdfResponse, readErrorMessage, RunEvent, RunSummary } from './api';
+import MarkdownViewer from './MarkdownViewer';
 
 const RECENT_COLLAPSED_COUNT = 3;
 const ITERATIVE_LOG_LIMIT = 6;
@@ -127,9 +128,10 @@ interface Props {
   onRunningChange?: (running: boolean) => void;
   pendingQuery?: string;
   onPendingQueryConsumed?: () => void;
+  isVisible?: boolean;
 }
 
-export default function ResearchPanel({ onRunningChange, pendingQuery, onPendingQueryConsumed }: Props) {
+export default function ResearchPanel({ onRunningChange, pendingQuery, onPendingQueryConsumed, isVisible }: Props) {
   const [query, setQuery] = useState('');
   const [runId, setRunId] = useState<string | null>(null);
   const [status, setStatus] = useState('idle');
@@ -185,6 +187,10 @@ export default function ResearchPanel({ onRunningChange, pendingQuery, onPending
 
   useEffect(() => {
     loadHistory();
+  }, []);
+
+  useEffect(() => {
+    if (isVisible === false) return;
     apiFetch('/config')
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
@@ -194,7 +200,7 @@ export default function ResearchPanel({ onRunningChange, pendingQuery, onPending
         }
       })
       .catch(() => {});
-  }, []);
+  }, [isVisible]);
 
   useEffect(() => {
     if (!runId) return;
@@ -470,7 +476,7 @@ export default function ResearchPanel({ onRunningChange, pendingQuery, onPending
                   <span style={{ fontFamily: 'var(--font-serif)', fontSize: '14px', fontWeight: 'bold', color: 'var(--text-primary)' }}>{previewQuery || 'Research query'}</span>
                   <span>{new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
                 </div>
-                <pre className="report-preview" style={{ fontFamily: 'var(--font-serif)' }}>{markdownToPlainText(activePreview).split('\n').slice(0, 22).join('\n')}</pre>
+                <div className="report-preview-md"><MarkdownViewer content={activePreview} /></div>
                 <div className="report-watermark mono">REF: {previewRunId || runId || 'N/A'}</div>
               </div>
             ) : (
@@ -534,7 +540,7 @@ export default function ResearchPanel({ onRunningChange, pendingQuery, onPending
             {reportLoading ? (
               <div className="muted">Loading report...</div>
             ) : (
-              <pre className="report-full" style={{ fontFamily: 'var(--font-serif)' }}>{markdownToPlainText(fullReport || 'No report content.')}</pre>
+              <MarkdownViewer content={fullReport || 'No report content.'} />
             )}
           </div>
         </div>

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { apiFetch, downloadPdfResponse, markdownToPlainText, Topic, Brief, RecentBrief, Article } from './api';
+import MarkdownViewer from './MarkdownViewer';
 
 interface Props {
   topics: Topic[];
@@ -27,7 +28,19 @@ type ParsedBriefView = {
   entries: RenderedBriefEntry[];
   sources: RenderedSource[];
   fallbackText: string;
+  fallbackMarkdown: string;
 };
+
+const SOURCE_SECTION_RE = /^##\s+(sources|\u6765\u6e90\u7d22\u5f15|\u6765\u6e90|\u30bd\u30fc\u30b9\u7d22\u5f15|\u30bd\u30fc\u30b9)$/i;
+const TAKEAWAYS_SECTION_RE = /^\*\*(key takeaways|\u5173\u952e\u8981\u70b9|\u8981\u70b9|\u91cd\u8981\u30dd\u30a4\u30f3\u30c8)\*\*$/i;
+const TAKEAWAYS_LABEL_RE = /^(key takeaways|\u5173\u952e\u8981\u70b9|\u8981\u70b9|\u91cd\u8981\u30dd\u30a4\u30f3\u30c8)$/i;
+const SENTIMENT_RELIABILITY_RE =
+  /^\*?(?:sentiment|\u60c5\u7eea|\u30bb\u30f3\u30c1\u30e1\u30f3\u30c8):\s*([^|*]+)\|\s*(?:reliability|\u53ef\u4fe1\u5ea6|\u4fe1\u983c\u6027):\s*([^*]+)\*?$/i;
+const RELATED_ARTICLES_RE = /(?:related articles|\u76f8\u5173\u6587\u7ae0|\u95a2\u9023\u8a18\u4e8b):\s*(\d+)/i;
+const EVIDENCE_REFS_RE = /^\*?(?:evidence refs|evidence references|\u8bc1\u636e\u5f15\u7528|\u30a8\u30d3\u30c7\u30f3\u30b9\u53c2\u7167):\s*/i;
+const SYNTHESIS_SECTION_RE = /^##\s+(Synthesis|\u{1F4CC}.*|\u4eca\u65e5\u6838\u5fc3.*)$/iu;
+const CLUSTER_SECTION_RE = /^##\s+(\u{1F4C2}.*|\d+\.\s+.+|\u30c6\u30fc\u30de\u5225\u52d5\u5411.*)$/iu;
+const INSIGHTS_SECTION_RE = /^##\s+\u{1F4A1}\s*(.*)$/iu;
 
 const _isBoilerplateLine = (line: string): boolean => {
   const normalized = line.trim().toLowerCase();
@@ -57,7 +70,7 @@ const formatBriefTimestamp = (brief: Brief): string => {
 
 const splitBriefContent = (content: string): { body: string; sources: string[] } => {
   const lines = (content || '').split('\n');
-  const sourceHeaderIndex = lines.findIndex((line) => /^##\s+sources/i.test(line.trim()));
+  const sourceHeaderIndex = lines.findIndex((line) => SOURCE_SECTION_RE.test(line.trim()));
   const bodyLines = sourceHeaderIndex >= 0 ? lines.slice(0, sourceHeaderIndex) : lines;
   const sourceLines = sourceHeaderIndex >= 0 ? lines.slice(sourceHeaderIndex + 1) : [];
   const sources = sourceLines
@@ -128,7 +141,7 @@ const normalizeTitleForMatch = (value: string): string =>
     .replace(/\s+/g, ' ')
     .trim();
 
-const parseBriefView = (content: string): ParsedBriefView => {
+export const parseBriefView = (content: string): ParsedBriefView => {
   const { body, sources } = splitBriefContent(content || '');
   const sourceItems = sources.map(parseSourceLine);
   const lines = (body || '').split('\n');
@@ -150,7 +163,7 @@ const parseBriefView = (content: string): ParsedBriefView => {
     const line = rawLine.trim();
     if (!line || line === '---') continue;
 
-    const synthMatch = line.match(/^##\s+Synthesis$/i);
+    const synthMatch = line.match(SYNTHESIS_SECTION_RE);
     if (synthMatch) {
       flush();
       currentCluster = '__synthesis__';
@@ -158,10 +171,18 @@ const parseBriefView = (content: string): ParsedBriefView => {
       continue;
     }
 
-    const clusterMatch = line.match(/^##\s+\d+\.\s+(.+)$/i);
+    const clusterMatch = line.match(CLUSTER_SECTION_RE);
     if (clusterMatch) {
       flush();
       currentCluster = clusterMatch[1].trim() || 'other';
+      mode = 'summary';
+      continue;
+    }
+
+    const insightsMatch = line.match(INSIGHTS_SECTION_RE);
+    if (insightsMatch) {
+      flush();
+      currentCluster = insightsMatch[1].trim() || 'Insights';
       mode = 'summary';
       continue;
     }
@@ -185,7 +206,7 @@ const parseBriefView = (content: string): ParsedBriefView => {
 
     if (!current) continue;
 
-    if (/^\*\*key takeaways\*\*$/i.test(line)) {
+    if (TAKEAWAYS_SECTION_RE.test(line)) {
       mode = 'takeaways';
       continue;
     }
@@ -193,26 +214,26 @@ const parseBriefView = (content: string): ParsedBriefView => {
     const boldLine = line.match(/^\*\*(.+)\*\*$/);
     if (boldLine) {
       const value = boldLine[1].trim();
-      if (!/^key takeaways$/i.test(value) && !current.headline) {
+      if (!TAKEAWAYS_LABEL_RE.test(value) && !current.headline) {
         current.headline = value;
         continue;
       }
     }
 
-    const sentimentLine = line.match(/^\*?sentiment:\s*([^|*]+)\|\s*reliability:\s*([^*]+)\*?$/i);
+    const sentimentLine = line.match(SENTIMENT_RELIABILITY_RE);
     if (sentimentLine) {
       current.sentiment = sentimentLine[1].trim().toLowerCase();
       current.reliability = sentimentLine[2].trim().toLowerCase();
       continue;
     }
 
-    const relatedLine = line.match(/related articles:\s*(\d+)/i);
+    const relatedLine = line.match(RELATED_ARTICLES_RE);
     if (relatedLine) {
       current.relatedArticles = Number(relatedLine[1]) || 0;
       continue;
     }
 
-    if (/^\*?evidence refs:\s*/i.test(line)) {
+    if (EVIDENCE_REFS_RE.test(line)) {
       continue;
     }
 
@@ -233,6 +254,7 @@ const parseBriefView = (content: string): ParsedBriefView => {
     entries,
     sources: sourceItems,
     fallbackText: toReadableBriefBody(body),
+    fallbackMarkdown: body,
   };
 };
 
@@ -491,6 +513,10 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
   const isRefreshing = refreshPhase !== 'idle' && refreshPhase !== 'done';
   const selectedView = selectedBrief ? parseBriefView(selectedBrief.content || '') : null;
   const synthesisEntry = selectedView?.entries?.find(e => e.clusterLabel === '__synthesis__') || null;
+  const clusterEntries = useMemo(
+    () => (selectedView?.entries || []).filter((e) => e.clusterLabel !== '__synthesis__'),
+    [selectedView],
+  );
 
   const compactSourceName = (source: string): string => {
     const raw = (source || '').trim();
@@ -663,7 +689,7 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
                       </article>
                     </div>
                   ) : (
-                    <pre className="brief-content">{parsed.fallbackText}</pre>
+                    <MarkdownViewer content={parsed.fallbackMarkdown || parsed.fallbackText || ''} className="brief-content" />
                   )}
 
                   <div className="keyword-row">
@@ -791,7 +817,39 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
                           </div>
                         </article>
                       ) : (
-                        <pre className="brief-content">{selectedView?.fallbackText || 'No synthesized summary available yet.'}</pre>
+                        <MarkdownViewer content={selectedView?.fallbackMarkdown || selectedView?.fallbackText || 'No synthesized summary available yet.'} className="brief-content" />
+                      )}
+
+                      {clusterEntries.length > 0 && (
+                        <div className="brief-cluster-entries">
+                          {clusterEntries.map((entry, eIdx) => (
+                            <article key={`${selectedBrief.id}-cluster-${eIdx}`} className="brief-article">
+                              <div className="brief-article-head ui-font">
+                                <div className="brief-article-meta">
+                                  <span className="brief-chip">{entry.topicTag}</span>
+                                  {entry.clusterLabel !== 'other' && (
+                                    <>
+                                      <span className="brief-meta-sep">|</span>
+                                      <span>{entry.clusterLabel}</span>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                              {entry.headline && <h5 className="brief-headline">{entry.headline}</h5>}
+                              <p className="brief-summary">{entry.summary}</p>
+                              {entry.takeaways.length > 0 && entry.takeaways[0] !== 'No additional verified signal.' && (
+                                <div className="brief-takeaways">
+                                  <div className="brief-takeaways-title ui-font">Key Takeaways</div>
+                                  <ul className="list-diamond">
+                                    {entry.takeaways.slice(0, 6).map((t, tIdx) => (
+                                      <li key={`${selectedBrief.id}-c${eIdx}-tk-${tIdx}`}>{t}</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+                            </article>
+                          ))}
+                        </div>
                       )}
 
                       <div className="keyword-row mt-6">

@@ -8,6 +8,7 @@ from typing import Any, Dict, Iterable
 import requests
 
 from .base import SearchResponse, SearchResult, SearchTool
+from .openai_compat_search import classify_provider_error
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,9 @@ class BochaSearchTool(SearchTool):
         if not api_key:
             raise ValueError("Bocha API key is required.")
         self.api_key = api_key
+        self.search_mode = "search_api"
+        self.last_error_class = ""
+        self.last_error_message = ""
 
     def search(self, query: str, max_results: int = 5) -> SearchResponse:
         payload = {"query": query, "count": max(1, max_results), "summary": True}
@@ -39,9 +43,20 @@ class BochaSearchTool(SearchTool):
                 )
                 for item in items
             ]
+            self.last_error_class = ""
+            self.last_error_message = ""
             return SearchResponse(query=query, results=[r for r in results if r.title or r.url or r.content])
+        except requests.HTTPError as exc:
+            error_class = classify_provider_error(exc)
+            logger.error("Bocha search failed [%s] (HTTP %s): %s", error_class, getattr(exc.response, 'status_code', 0), exc)
+            self.last_error_class = error_class
+            self.last_error_message = str(exc)[:200]
+            return SearchResponse(query=query, results=[])
         except Exception as exc:
-            logger.warning("Bocha search failed: %s", exc)
+            error_class = classify_provider_error(exc)
+            logger.error("Bocha search failed [%s]: %s", error_class, exc)
+            self.last_error_class = error_class
+            self.last_error_message = str(exc)[:200]
             return SearchResponse(query=query, results=[])
 
     @staticmethod

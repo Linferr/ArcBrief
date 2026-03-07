@@ -21,6 +21,7 @@ class RunEvent:
 class RunRecord:
     run_id: str
     query: str
+    run_type: str = "research"
     language_used: str = "English (US)"
     status: str = "queued"
     started_at: Optional[str] = None

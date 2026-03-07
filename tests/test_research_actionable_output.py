@@ -25,13 +25,14 @@ def test_formatting_enforces_required_sections():
     assert "## Latest Viewpoints" in report
     assert "## Actionable Tactics" in report
     assert "## Toolchain and Config Templates" in report
-    assert "## Risks and Counterexamples" in report
-    assert "## Sources" in report
+    assert "## Risks & Contrarian Views" in report
+    # Sources is NOT in _required_sections — it is appended by agent._append_sources()
+    assert "## Sources" not in report
 
 
 def test_summary_returns_evidence_insufficient_message_when_llm_output_invalid():
     node = SummaryNode(_EmptyJsonLLM())
-    text = node.run(
+    text, source_map = node.run(
         "Karpathy practical workflow",
         "Need practical tactics.",
         "karpathy workflow latest",
@@ -40,3 +41,5 @@ def test_summary_returns_evidence_insufficient_message_when_llm_output_invalid()
     )
     assert "Evidence" in text
     assert "[S1]" in text
+    assert "S1" in source_map
+    assert source_map["S1"]["url"] == "https://x.com/a"

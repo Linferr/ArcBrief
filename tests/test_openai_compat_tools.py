@@ -85,3 +85,45 @@ def test_provider_tools_delegate_to_openai_compat_client(monkeypatch):
 
     assert z_tool.client.kwargs["provider_name"] == "Zhipu Web Search"
     assert v_tool.client.kwargs["provider_name"] == "Volcano Engine"
+
+
+def test_openai_compat_plain_chat_sets_degraded_metadata(monkeypatch):
+    captured = {}
+
+    class _Resp:
+        def model_dump(self):
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "Plain chat answer without citations.",
+                        }
+                    }
+                ]
+            }
+
+    class _Chat:
+        class completions:
+            @staticmethod
+            def create(**kwargs):
+                captured["request"] = kwargs
+                return _Resp()
+
+    class _DummyOpenAI:
+        def __init__(self, api_key: str, base_url: str):
+            self.chat = _Chat()
+
+    monkeypatch.setattr(oc, "OpenAI", _DummyOpenAI)
+
+    client = oc.OpenAICompatWebSearchClient(
+        provider_name="Volcano Engine",
+        api_key="vk",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        model="ep-123",
+        search_mode="plain_chat",
+    )
+    response = client.search("mcp latest", max_results=1)
+
+    assert "tools" not in captured["request"]
+    assert response.results[0].url == ""
+    assert client.search_mode == "plain_chat"

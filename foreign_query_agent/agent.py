@@ -3,7 +3,7 @@
 import os
 import re
 from datetime import datetime
-from typing import Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 from .config import Settings
@@ -137,12 +137,17 @@ class QueryAgent:
                         }
                     )
 
-                paragraph.latest_summary = self.summary_node.run(
+                summary_text, summary_smap = self.summary_node.run(
                     paragraph.title,
                     paragraph.content,
                     " | ".join(queries),
                     ranked_results,
                     language=language_used,
+                )
+                paragraph.latest_summary, paragraph.source_map = self._assign_global_source_ids(
+                    summary_text,
+                    summary_smap,
+                    state,
                 )
                 if paragraph.latest_summary:
                     write_log("query", f"Summary round 1: {paragraph.latest_summary[:300]}...", run_id=run_id)
@@ -239,13 +244,18 @@ class QueryAgent:
                         reflection_batches,
                     )
 
-                    paragraph.latest_summary = self.reflection_summary_node.run(
+                    refl_text, refl_smap = self.reflection_summary_node.run(
                         paragraph.title,
                         paragraph.content,
                         " | ".join(queries),
                         ranked_reflection_results,
                         paragraph.latest_summary,
                         language=language_used,
+                    )
+                    paragraph.latest_summary, paragraph.source_map = self._assign_global_source_ids(
+                        refl_text,
+                        refl_smap,
+                        state,
                     )
 
                     paragraph.reflection_count += 1
@@ -287,7 +297,9 @@ class QueryAgent:
             [{"title": p.title, "content": p.latest_summary} for p in state.paragraphs],
             language=language_used,
         )
-        final_report = self._append_sources(final_report, state.paragraphs, language_used)
+        final_report = self._strip_stale_sources(final_report)
+        final_report = self._strip_orphan_refs(final_report, state.global_source_map)
+        final_report = self._append_sources_from_map(final_report, state.global_source_map, language_used)
         write_log("query", "Final report generated", run_id=run_id)
         if progress_cb:
             progress_cb({"stage": "final", "message": "Report formatted", "run_id": run_id})
@@ -310,7 +322,64 @@ class QueryAgent:
         ts = datetime.now().strftime("%H%M%S")
         return f"{slugify(query)}_{ts}"
 
-    def _append_sources(self, report: str, paragraphs: List[ParagraphState], language: str) -> str:
+    @staticmethod
+    def _strip_stale_sources(report: str) -> str:
+        """Remove any LLM-generated Sources section before the real one is appended."""
+        pattern = re.compile(
+            r"\n##\s+(?:Sources|来源|来源索引|ソース|ソース索引|懂埭|末奈旦)\s*\n.*?(?=\n##\s+|\Z)",
+            re.DOTALL,
+        )
+        report = pattern.sub("\n", report)
+        for leaked in (
+            'Sources appended automatically per protocol.',
+            'sources are appended automatically',
+        ):
+            report = report.replace(leaked, '')
+        return report.rstrip()
+
+    @staticmethod
+    def _assign_global_source_ids(
+        text: str,
+        local_source_map: Dict[str, Dict[str, str]],
+        state: ReportState,
+    ) -> Tuple[str, Dict[str, Dict[str, str]]]:
+        """Promote paragraph-local S-IDs to report-global IDs immediately."""
+        if not local_source_map:
+            return text, {}
+
+        rewritten = text or ""
+        paragraph_source_map: Dict[str, Dict[str, str]] = {}
+        replacements: List[Tuple[str, str]] = []
+
+        for local_id in sorted(local_source_map.keys(), key=lambda key: int(key[1:])):
+            global_id = f"S{state.next_source_index}"
+            state.next_source_index += 1
+            source_info = dict(local_source_map[local_id])
+            state.global_source_map[global_id] = source_info
+            paragraph_source_map[global_id] = source_info
+            replacements.append((local_id, global_id))
+
+        for local_id, global_id in sorted(replacements, key=lambda item: int(item[0][1:]), reverse=True):
+            rewritten = rewritten.replace(f"[{local_id}]", f"[{global_id}]")
+
+        return rewritten, paragraph_source_map
+
+    @staticmethod
+    def _strip_orphan_refs(report: str, global_source_map: Dict[str, Dict[str, str]]) -> str:
+        """Remove [S#] references from the report that are not in the global source map."""
+        valid_ids = set(global_source_map.keys())
+        def _replace(match: re.Match) -> str:
+            sid = f"S{match.group(1)}"
+            return match.group(0) if sid in valid_ids else ""
+        return re.sub(r'\[S(\d+)\]', _replace, report)
+
+    @staticmethod
+    def _append_sources_from_map(
+        report: str,
+        global_source_map: Dict[str, Dict[str, str]],
+        language: str,
+    ) -> str:
+        """Append a numbered Sources section using the global source map."""
         heading = {
             "Chinese (Simplified)": "## 来源",
             "Japanese": "## ソース",
@@ -321,20 +390,16 @@ class QueryAgent:
         }.get(language, "- (no sources recorded)")
 
         lines = ["", heading, ""]
-        seen = set()
-        for paragraph in paragraphs:
-            for item in paragraph.search_history:
-                key = (item.title, item.url)
-                if key in seen:
-                    continue
-                seen.add(key)
-                title = item.title.strip() or "Untitled"
-                url = item.url.strip() or ""
+        if global_source_map:
+            for sid in sorted(global_source_map.keys(), key=lambda k: int(k[1:])):
+                info = global_source_map[sid]
+                title = (info.get("title") or "Untitled").strip()
+                url = (info.get("url") or "").strip()
+                entry = f"- [{sid}] {title}"
                 if url:
-                    lines.append(f"- {title} -- {url}")
-                else:
-                    lines.append(f"- {title}")
-        if len(lines) == 3:
+                    entry += f" -- {url}"
+                lines.append(entry)
+        else:
             lines.append(empty_line)
         return report.rstrip() + "\n" + "\n".join(lines).rstrip() + "\n"
 

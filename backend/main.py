@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 from foreign_query_agent import QueryAgent, Settings
 from foreign_query_agent.tools.factory import ProviderUnavailableError, create_search_tool_with_meta
+from foreign_query_agent.tools.openai_compat_search import classify_provider_error
 from foreign_query_agent.utils import slugify
 
 from .state import RUNS, RunEvent, RunRecord
@@ -29,6 +30,7 @@ from .collection import Collector, collect_for_topic
 from .briefing import build_brief_for_topic, llm_chat
 from .pdf_export import render_pdf
 from .rate_limit import RateLimiter
+from .scraper import fetch_tldr_document, validate_public_http_url
 from .scheduler import ArcBriefScheduler
 
 
@@ -57,12 +59,55 @@ _active_chat = 0
 _chat_lock = threading.Lock()
 _collecting_topics: Dict[int, bool] = {}
 _collect_lock = threading.Lock()
+_diagnostics_lock = threading.Lock()
 _LAST_SEARCH_DIAGNOSTICS: Dict[str, Any] = {
     "search_provider_configured": APP_CONFIG_DEFAULTS.get("search_provider", "Tavily Search API"),
     "search_provider_effective": APP_CONFIG_DEFAULTS.get("search_provider", "Tavily Search API"),
     "search_provider_fallback": "",
     "search_llm_assisted": False,
 }
+
+
+def _snapshot_search_diagnostics() -> Dict[str, Any]:
+    with _diagnostics_lock:
+        snap = dict(_LAST_SEARCH_DIAGNOSTICS)
+    return {
+        "search_provider_configured": snap.get("search_provider_configured", "Tavily Search API"),
+        "search_provider_effective": snap.get("search_provider_effective", "Unavailable"),
+        "search_provider_fallback": snap.get("search_provider_fallback", ""),
+        "search_llm_assisted": bool(snap.get("search_llm_assisted", False)),
+    }
+
+
+def _tool_attr(tool: Any, name: str, default: Any = "") -> Any:
+    value = getattr(tool, name, None)
+    if value not in (None, ""):
+        return value
+    client = getattr(tool, "client", None)
+    if client is not None:
+        client_value = getattr(client, name, None)
+        if client_value not in (None, ""):
+            return client_value
+    return default
+
+
+def _provider_check_status(tool: Any, response: Any) -> tuple[str, Optional[str], str]:
+    error_class = str(_tool_attr(tool, "last_error_class", "") or "").strip()
+    error_detail = str(_tool_attr(tool, "last_error_message", "") or "").strip() or None
+    search_mode = str(_tool_attr(tool, "search_mode", "search_api") or "search_api")
+
+    if error_class:
+        return error_class, error_detail, search_mode
+
+    results = list(getattr(response, "results", []) or [])
+    if search_mode == "plain_chat":
+        has_structured_urls = any((getattr(item, "url", "") or "").strip() for item in results)
+        if results and not has_structured_urls:
+            return "degraded_plain_chat", "Plain-chat fallback returned ungrounded text without source URLs.", search_mode
+
+    status = "ok" if results else "empty_results"
+    return status, error_detail, search_mode
+
 
 _PUBLIC_READ_PATTERNS = (
     re.compile(r"^/api/health$"),
@@ -484,6 +529,17 @@ class RunRequest(BaseModel):
     language: Optional[str] = Field(default=None, max_length=64)
 
 
+class AnalyzeRequest(BaseModel):
+    product: str = Field(..., min_length=1, max_length=500)
+    language: Optional[str] = Field(default=None, max_length=64)
+
+
+class BookmarkCreateRequest(BaseModel):
+    user_id: str = Field(..., min_length=3, max_length=128)
+    brief_id: int = Field(..., gt=0)
+    note: Optional[str] = Field(default=None, max_length=280)
+
+
 class RunResponse(BaseModel):
     run_id: str
     status: str
@@ -681,11 +737,64 @@ def _cleanup_inmemory_runs() -> int:
     return len(to_remove)
 
 
-def _run_job(run_id: str, query: str, language: str) -> None:
+def _build_analyze_query(product: str) -> str:
+    subject = (product or "").strip()
+    return (
+        f"Analyze the product/company/initiative: {subject}\n\n"
+        "Research objective:\n"
+        "- Produce a PM-oriented strategic analysis grounded in recent evidence.\n"
+        "- Prioritize official product pages, pricing pages, launch notes, API/docs, benchmarks, "
+        "customer adoption signals, competitor comparisons, and credible commentary.\n\n"
+        "Target sections:\n"
+        "1. Product Overview\n"
+        "2. Business Model\n"
+        "3. Competitive Landscape\n"
+        "4. SWOT\n"
+        "5. User & Market\n"
+        "6. Strategic Watchpoints\n"
+    )
+
+
+def _rewrite_analysis_report(report: str, product: str, language: str) -> str:
+    language_hint = {
+        "Chinese (Simplified)": "Write in Simplified Chinese.",
+        "Japanese": "Write in Japanese.",
+    }.get(language, "Write in English (US).")
+    system_prompt = (
+        "You are a product strategy analyst. Rewrite the research report into a concise PM-oriented markdown report "
+        "with exactly these sections in order:\n"
+        "## Product Overview\n"
+        "## Business Model\n"
+        "## Competitive Landscape\n"
+        "## SWOT\n"
+        "## User & Market\n"
+        "## Strategic Watchpoints\n"
+        "Use evidence-driven language. Keep concrete facts, comparisons, risks, and market signals. "
+        "Do not add a sources section.\n"
+        f"{language_hint}"
+    )
+    rewritten = llm_chat(system_prompt, f"Subject: {product}\n\nResearch report:\n{report}")
+    if rewritten and "## Product Overview" in rewritten:
+        return rewritten
+    fallback = (
+        "## Product Overview\n"
+        f"- Subject: **{product}**\n"
+        f"- Source report excerpt: {report[:300].strip() or 'Evidence insufficient.'}\n\n"
+        "## Business Model\n- Evidence insufficient.\n\n"
+        "## Competitive Landscape\n- Evidence insufficient.\n\n"
+        "## SWOT\n- Evidence insufficient.\n\n"
+        "## User & Market\n- Evidence insufficient.\n\n"
+        "## Strategic Watchpoints\n- Evidence insufficient."
+    )
+    return fallback
+
+
+def _run_job(run_id: str, query: str, language: str, run_type: str = "research") -> None:
     record = RUNS[run_id]
     record.status = "running"
     record.started_at = datetime.utcnow().isoformat()
     record.language_used = _normalize_language(language)
+    record.run_type = run_type
 
     try:
         settings = Settings(output_dir="outputs")
@@ -733,14 +842,15 @@ def _run_job(run_id: str, query: str, language: str) -> None:
                 )
                 unavailable_reason = meta.fallback_reason or str(provider_err)
                 record.events.append(RunEvent(stage="error", message=f"PROVIDER_UNAVAILABLE: {unavailable_reason}"))
-                _LAST_SEARCH_DIAGNOSTICS.update(
-                    {
-                        "search_provider_configured": meta.provider_requested,
-                        "search_provider_effective": meta.provider_effective,
-                        "search_provider_fallback": unavailable_reason,
-                        "search_llm_assisted": bool(meta.llm_assisted_search),
-                    }
-                )
+                with _diagnostics_lock:
+                    _LAST_SEARCH_DIAGNOSTICS.update(
+                        {
+                            "search_provider_configured": meta.provider_requested,
+                            "search_provider_effective": meta.provider_effective,
+                            "search_provider_fallback": unavailable_reason,
+                            "search_llm_assisted": bool(meta.llm_assisted_search),
+                        }
+                    )
                 raise RuntimeError(f"PROVIDER_UNAVAILABLE: {unavailable_reason}") from provider_err
             meta = getattr(agent, "search_meta", None)
 
@@ -755,34 +865,39 @@ def _run_job(run_id: str, query: str, language: str) -> None:
                         ),
                     )
                 )
-                _LAST_SEARCH_DIAGNOSTICS.update(
-                    {
-                        "search_provider_configured": meta.provider_requested,
-                        "search_provider_effective": meta.provider_effective,
-                        "search_provider_fallback": meta.fallback_reason,
-                        "search_llm_assisted": bool(meta.llm_assisted_search),
-                    }
-                )
+                with _diagnostics_lock:
+                    _LAST_SEARCH_DIAGNOSTICS.update(
+                        {
+                            "search_provider_configured": meta.provider_requested,
+                            "search_provider_effective": meta.provider_effective,
+                            "search_provider_fallback": meta.fallback_reason,
+                            "search_llm_assisted": bool(meta.llm_assisted_search),
+                        }
+                    )
             else:
-                _LAST_SEARCH_DIAGNOSTICS.update(
-                    {
-                        "search_provider_configured": configured_search_provider,
-                        "search_provider_effective": configured_search_provider,
-                        "search_provider_fallback": "",
-                        "search_llm_assisted": False,
-                    }
-                )
+                with _diagnostics_lock:
+                    _LAST_SEARCH_DIAGNOSTICS.update(
+                        {
+                            "search_provider_configured": configured_search_provider,
+                            "search_provider_effective": configured_search_provider,
+                            "search_provider_fallback": "",
+                            "search_llm_assisted": False,
+                        }
+                    )
 
             def progress_cb(evt):
                 record.events.append(RunEvent(**evt))
 
-            safe_query = _sanitize_query(query)
+            raw_query = _build_analyze_query(query) if run_type == "analyze" else query
+            safe_query = _sanitize_query(raw_query)
             try:
                 report = agent.research(
                     safe_query,
                     progress_cb=progress_cb,
                     language=record.language_used,
                 )
+                if run_type == "analyze":
+                    report = _rewrite_analysis_report(report, query, record.language_used)
                 path = agent.save_report(report, settings.output_dir)
                 if idx > 0:
                     record.events.append(
@@ -935,9 +1050,10 @@ def system_status():
             merged = {**APP_CONFIG_DEFAULTS, **config}
             if not merged.get("critical_analysis_layer", True):
                 effective_max_reflections = 1
-            _LAST_SEARCH_DIAGNOSTICS["search_provider_configured"] = str(
-                merged.get("search_provider", _LAST_SEARCH_DIAGNOSTICS.get("search_provider_configured", "Tavily Search API"))
-            )
+            with _diagnostics_lock:
+                _LAST_SEARCH_DIAGNOSTICS["search_provider_configured"] = str(
+                    merged.get("search_provider", _LAST_SEARCH_DIAGNOSTICS.get("search_provider_configured", "Tavily Search API"))
+                )
         except Exception:
             pass
     configured_provider = str(merged.get("search_provider", "Tavily Search API"))
@@ -956,33 +1072,36 @@ def system_status():
             volcengine_model_ep=settings_probe.volcengine_model_ep,
             strict=settings_probe.research_strict_provider,
         )
-        _LAST_SEARCH_DIAGNOSTICS.update(
-            {
-                "search_provider_configured": configured_provider,
-                "search_provider_effective": meta.provider_effective,
-                "search_provider_fallback": meta.fallback_reason,
-                "search_llm_assisted": bool(meta.llm_assisted_search),
-            }
-        )
+        with _diagnostics_lock:
+            _LAST_SEARCH_DIAGNOSTICS.update(
+                {
+                    "search_provider_configured": configured_provider,
+                    "search_provider_effective": meta.provider_effective,
+                    "search_provider_fallback": meta.fallback_reason,
+                    "search_llm_assisted": bool(meta.llm_assisted_search),
+                }
+            )
     except ProviderUnavailableError as probe_unavailable:
         probe_meta = probe_unavailable.meta
-        _LAST_SEARCH_DIAGNOSTICS.update(
-            {
-                "search_provider_configured": configured_provider,
-                "search_provider_effective": "Unavailable",
-                "search_provider_fallback": probe_meta.fallback_reason or str(probe_unavailable),
-                "search_llm_assisted": False,
-            }
-        )
+        with _diagnostics_lock:
+            _LAST_SEARCH_DIAGNOSTICS.update(
+                {
+                    "search_provider_configured": configured_provider,
+                    "search_provider_effective": "Unavailable",
+                    "search_provider_fallback": probe_meta.fallback_reason or str(probe_unavailable),
+                    "search_llm_assisted": False,
+                }
+            )
     except Exception as probe_err:
-        _LAST_SEARCH_DIAGNOSTICS.update(
-            {
-                "search_provider_configured": configured_provider,
-                "search_provider_effective": "Unavailable",
-                "search_provider_fallback": f"Probe failed: {probe_err}",
-                "search_llm_assisted": False,
-            }
-        )
+        with _diagnostics_lock:
+            _LAST_SEARCH_DIAGNOSTICS.update(
+                {
+                    "search_provider_configured": configured_provider,
+                    "search_provider_effective": "Unavailable",
+                    "search_provider_fallback": f"Probe failed: {probe_err}",
+                    "search_llm_assisted": False,
+                }
+            )
     return {
         "started_at": _STARTUP_TIME,
         "scheduler_running": SCHEDULER is not None and SCHEDULER.scheduler.running,
@@ -998,12 +1117,85 @@ def system_status():
         "public_export_rate_limit_per_min": PUBLIC_EXPORT_RATE_LIMIT,
         "run_route_limit_per_min": RUN_ROUTE_LIMIT,
         "chat_route_limit_per_min": CHAT_ROUTE_LIMIT,
-        "search_provider_configured": _LAST_SEARCH_DIAGNOSTICS.get("search_provider_configured", "Tavily Search API"),
-        "search_provider_effective": _LAST_SEARCH_DIAGNOSTICS.get("search_provider_effective", "Unavailable"),
-        "search_provider_fallback": _LAST_SEARCH_DIAGNOSTICS.get("search_provider_fallback", ""),
-        "search_llm_assisted": bool(_LAST_SEARCH_DIAGNOSTICS.get("search_llm_assisted", False)),
+        **_snapshot_search_diagnostics(),
         "jobs": jobs,
     }
+
+
+@app.get("/api/system/provider-check")
+def provider_check():
+    """Diagnose all configured search providers with a real test search."""
+    settings_probe = Settings(output_dir="outputs")
+    providers_config = [
+        (
+            "Tavily Search API",
+            {"fallback_tavily_key": settings_probe.tavily_api_key},
+        ),
+        (
+            "Bocha Search",
+            {"bocha_api_key": settings_probe.bocha_api_key},
+        ),
+        (
+            "Zhipu Web Search",
+            {
+                "zhipu_api_key": settings_probe.zhipu_api_key,
+                "zhipu_openai_base_url": settings_probe.zhipu_openai_base_url,
+                "zhipu_web_search_model": settings_probe.zhipu_web_search_model,
+            },
+        ),
+        (
+            "Exa Search",
+            {"exa_api_key": settings_probe.exa_api_key},
+        ),
+        (
+            "Volcano Engine",
+            {
+                "volcengine_api_key": settings_probe.volcengine_api_key,
+                "volcengine_openai_base_url": settings_probe.volcengine_openai_base_url,
+                "volcengine_model_ep": settings_probe.volcengine_model_ep,
+            },
+        ),
+    ]
+    results = []
+    for provider_name, kwargs in providers_config:
+        start = time.monotonic()
+        try:
+            tool, _meta = create_search_tool_with_meta(
+                provider_name, strict=True, **kwargs,
+            )
+            response = tool.search("test", max_results=1)
+            latency_ms = int((time.monotonic() - start) * 1000)
+            status, error_detail, search_mode = _provider_check_status(tool, response)
+            results.append({
+                "provider": provider_name,
+                "status": status,
+                "latency_ms": latency_ms,
+                "result_count": len(response.results),
+                "error_detail": error_detail,
+                "search_mode": search_mode,
+            })
+        except ProviderUnavailableError as e:
+            latency_ms = int((time.monotonic() - start) * 1000)
+            results.append({
+                "provider": provider_name,
+                "status": "config_error",
+                "latency_ms": latency_ms,
+                "result_count": 0,
+                "error_detail": str(e)[:200],
+                "search_mode": "unavailable",
+            })
+        except Exception as e:
+            latency_ms = int((time.monotonic() - start) * 1000)
+            error_class = classify_provider_error(e)
+            results.append({
+                "provider": provider_name,
+                "status": error_class,
+                "latency_ms": latency_ms,
+                "result_count": 0,
+                "error_detail": str(e)[:200],
+                "search_mode": "unknown",
+            })
+    return {"providers": results, "checked_at": datetime.utcnow().isoformat()}
 
 
 @app.get("/api/config")
@@ -1033,7 +1225,11 @@ def update_app_config(payload: AppConfigUpdateRequest):
 @app.post("/api/run", response_model=RunResponse)
 def start_run(payload: RunRequest):
     global _active_research
-    language_used = _normalize_language(payload.language)
+    raw_lang = payload.language
+    if not raw_lang:
+        config = DB.get_app_config()
+        raw_lang = config.get("report_language")
+    language_used = _normalize_language(raw_lang)
     with _research_lock:
         if _active_research >= MAX_CONCURRENT_RESEARCH:
             raise HTTPException(status_code=429, detail=f"Too many concurrent research tasks (max {MAX_CONCURRENT_RESEARCH})")
@@ -1043,9 +1239,33 @@ def start_run(payload: RunRequest):
         with _research_lock:
             _active_research -= 1
         raise HTTPException(status_code=400, detail="Run already exists")
-    record = RunRecord(run_id=run_id, query=payload.query, language_used=language_used)
+    record = RunRecord(run_id=run_id, query=payload.query, run_type="research", language_used=language_used)
     RUNS[run_id] = record
-    thread = threading.Thread(target=_run_job, args=(run_id, payload.query, language_used), daemon=True)
+    thread = threading.Thread(target=_run_job, args=(run_id, payload.query, language_used, "research"), daemon=True)
+    thread.start()
+    return RunResponse(run_id=run_id, status="running", language_used=language_used)
+
+
+@app.post("/api/analyze", response_model=RunResponse)
+def start_analysis(payload: AnalyzeRequest):
+    global _active_research
+    raw_lang = payload.language
+    if not raw_lang and DB is not None:
+        config = DB.get_app_config()
+        raw_lang = config.get("report_language")
+    language_used = _normalize_language(raw_lang)
+    with _research_lock:
+        if _active_research >= MAX_CONCURRENT_RESEARCH:
+            raise HTTPException(status_code=429, detail=f"Too many concurrent research tasks (max {MAX_CONCURRENT_RESEARCH})")
+        _active_research += 1
+    run_id = f"analyze_{slugify(payload.product)}_{datetime.utcnow().strftime('%H%M%S')}"
+    if run_id in RUNS:
+        with _research_lock:
+            _active_research -= 1
+        raise HTTPException(status_code=400, detail="Run already exists")
+    record = RunRecord(run_id=run_id, query=payload.product, run_type="analyze", language_used=language_used)
+    RUNS[run_id] = record
+    thread = threading.Thread(target=_run_job, args=(run_id, payload.product, language_used, "analyze"), daemon=True)
     thread.start()
     return RunResponse(run_id=run_id, status="running", language_used=language_used)
 
@@ -1557,6 +1777,41 @@ def get_articles(topic_id: int, hours: int = 24, sort: str = "time", date: Optio
     return {"topic_id": topic_id, "topic_name": topic.name, "count": len(enriched), "articles": enriched}
 
 
+@app.post("/api/bookmarks")
+def create_bookmark(payload: BookmarkCreateRequest):
+    if DB is None:
+        raise HTTPException(status_code=500, detail="DB not initialized")
+    brief = DB.get_brief_by_id(payload.brief_id)
+    if not brief:
+        raise HTTPException(status_code=404, detail="Brief not found")
+    DB.save_bookmark(payload.user_id.strip(), payload.brief_id, (payload.note or "").strip() or None)
+    return {"status": "saved", "user_id": payload.user_id.strip(), "brief_id": payload.brief_id}
+
+
+@app.get("/api/bookmarks/{user_id}")
+def list_bookmarks(user_id: str, limit: int = 50):
+    if DB is None:
+        raise HTTPException(status_code=500, detail="DB not initialized")
+    normalized = (user_id or "").strip()
+    if len(normalized) < 3:
+        raise HTTPException(status_code=400, detail="Invalid user_id")
+    items = DB.list_bookmarks(normalized, limit=max(1, min(limit, 100)))
+    return {"user_id": normalized, "count": len(items), "items": items}
+
+
+@app.delete("/api/bookmarks/{user_id}/{brief_id}")
+def delete_bookmark(user_id: str, brief_id: int):
+    if DB is None:
+        raise HTTPException(status_code=500, detail="DB not initialized")
+    normalized = (user_id or "").strip()
+    if len(normalized) < 3:
+        raise HTTPException(status_code=400, detail="Invalid user_id")
+    deleted = DB.delete_bookmark(normalized, brief_id)
+    if deleted == 0:
+        raise HTTPException(status_code=404, detail="Bookmark not found")
+    return {"status": "deleted", "user_id": normalized, "brief_id": brief_id}
+
+
 @app.put("/api/topics/{topic_id}")
 def update_topic(topic_id: int, payload: TopicUpdateRequest):
     if DB is None:
@@ -1584,6 +1839,189 @@ class ChatRequest(BaseModel):
     language: Optional[str] = Field(default=None, max_length=64)
 
 
+class TLDRRequest(BaseModel):
+    url: str = Field(..., min_length=8, max_length=2048)
+    language: Optional[str] = Field(default=None, max_length=64)
+    created_by: Optional[str] = Field(default="system", max_length=128)
+
+
+def _fallback_tldr_summary(content: str) -> str:
+    compact = re.sub(r"\s+", " ", (content or "").strip())
+    if len(compact) <= 280:
+        return compact or "No summary available."
+    return compact[:279].rstrip() + "…"
+
+
+def _summarize_ingested_document(title: str, content: str, language_used: str) -> str:
+    language_hint = {
+        "Chinese (Simplified)": "Write in Simplified Chinese.",
+        "Japanese": "Write in Japanese.",
+    }.get(language_used, "Write in English (US).")
+    prompt = (
+        "You summarize a single article for mobile reading. "
+        "Return one dense paragraph in 2-4 sentences. "
+        "Focus on the core claim, why it matters, and any meaningful constraint. "
+        "Do not use markdown bullets. Do not mention that you are an AI.\n"
+        f"{language_hint}"
+    )
+    user = f"Title: {title}\n\nContent:\n{content[:6000]}"
+    summary = llm_chat(prompt, user)
+    return (summary or "").strip() or _fallback_tldr_summary(content)
+
+
+def _chat_config_value(key: str, default: Any) -> Any:
+    if DB is None:
+        return default
+    try:
+        config = DB.get_app_config()
+        return config.get(key, default)
+    except Exception:
+        return default
+
+
+def _build_brief_chat_context(req: "ChatRequest") -> tuple[str, str, List[str]]:
+    all_briefs = DB.list_recent_briefs(limit=20, topic_id=req.topic_id) if DB is not None else []
+    cutoff = (datetime.utcnow() - timedelta(days=req.days)).isoformat()
+    briefs = [b for b in all_briefs if (b.get("created_at") or "") >= cutoff]
+    if not briefs:
+        return "", "", []
+
+    blocks: List[str] = []
+    sources: List[str] = []
+    total_chars = 0
+    for b in briefs[:5]:
+        content = (b.get("content") or "")[:1500]
+        if total_chars + len(content) > 6000:
+            break
+        date_label = b.get("date") or b.get("created_at", "")[:10]
+        topic_label = b.get("topic_name", f"Topic {b.get('topic_id', '')}")
+        blocks.append(f"[{date_label} | {topic_label}]\n{content}")
+        sources.append(f"{date_label} | {topic_label}")
+        total_chars += len(content)
+    if not blocks:
+        return "", "", []
+    return "brief_context", "\n\n---\n\n".join(blocks), sources
+
+
+def _build_article_chat_context(req: "ChatRequest") -> tuple[str, str, List[str]]:
+    if DB is None:
+        return "", "", []
+    articles = DB.search_articles(req.message, topic_id=req.topic_id, limit=5, days=req.days)
+    if not articles:
+        return "", "", []
+    blocks = []
+    sources = []
+    for article in articles:
+        title = article.get("title", "Untitled article")
+        body = (article.get("content") or "")[:1200]
+        url = article.get("url", "")
+        source = article.get("source", "")
+        blocks.append(f"[Article | {title}]\nSource: {source}\nURL: {url}\n{body}")
+        sources.append(f"Article | {title} | {url}")
+    return "article_context", "\n\n---\n\n".join(blocks), sources
+
+
+def _build_ingestion_chat_context(req: "ChatRequest") -> tuple[str, str, List[str]]:
+    if DB is None:
+        return "", "", []
+    ingestions = DB.search_user_ingestions(req.message, limit=5, days=max(req.days, 30))
+    if not ingestions:
+        return "", "", []
+    blocks = []
+    sources = []
+    for row in ingestions:
+        title = row.get("title", "Untitled ingestion")
+        body = ((row.get("summary") or "") + "\n" + (row.get("content") or ""))[:1200]
+        url = row.get("final_url") or row.get("url") or ""
+        blocks.append(f"[Ingestion | {title}]\nURL: {url}\n{body}")
+        sources.append(f"Ingestion | {title} | {url}")
+    return "ingestion_context", "\n\n---\n\n".join(blocks), sources
+
+
+def _build_web_fallback_chat_context(req: "ChatRequest") -> tuple[str, str, List[str]]:
+    if DB is None:
+        return "", "", []
+    configured_provider = str(_chat_config_value("search_provider", APP_CONFIG_DEFAULTS.get("search_provider", "Tavily Search API")))
+    settings = Settings(output_dir="outputs")
+    tool, _meta = create_search_tool_with_meta(
+        configured_provider,
+        fallback_tavily_key=settings.tavily_api_key,
+        bocha_api_key=settings.bocha_api_key,
+        zhipu_api_key=settings.zhipu_api_key,
+        zhipu_openai_base_url=settings.zhipu_openai_base_url,
+        zhipu_web_search_model=settings.zhipu_web_search_model,
+        exa_api_key=settings.exa_api_key,
+        volcengine_api_key=settings.volcengine_api_key,
+        volcengine_openai_base_url=settings.volcengine_openai_base_url,
+        volcengine_model_ep=settings.volcengine_model_ep,
+        strict=False,
+    )
+    response = tool.search(req.message, max_results=4)
+    results = list(getattr(response, "results", []) or [])
+    if not results:
+        return "", "", []
+    blocks = []
+    sources = []
+    for result in results[:4]:
+        blocks.append(
+            f"[Web | {result.title}]\nURL: {result.url}\n{(result.content or '')[:1000]}"
+        )
+        sources.append(f"Web | {result.title} | {result.url}")
+    return "web_fallback", "\n\n---\n\n".join(blocks), sources
+
+
+@app.post("/api/tldr")
+def create_tldr(req: TLDRRequest):
+    if DB is None:
+        raise HTTPException(status_code=500, detail="DB not initialized")
+
+    try:
+        safe_url = validate_public_http_url(req.url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    language_used = _normalize_language(req.language)
+    cached = DB.get_user_ingestion(safe_url)
+    if cached and cached.get("summary"):
+        return {
+            "title": cached.get("title", ""),
+            "summary": cached.get("summary", ""),
+            "url": cached.get("final_url") or cached.get("url") or safe_url,
+            "source_domain": cached.get("source_domain", ""),
+            "ingested": True,
+            "cached": True,
+            "language_used": cached.get("language_used") or language_used,
+        }
+
+    try:
+        doc = fetch_tldr_document(safe_url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch URL: {exc}")
+
+    summary = _summarize_ingested_document(doc.title, doc.content, language_used)
+    DB.save_user_ingestion(
+        url=safe_url,
+        final_url=doc.final_url,
+        title=doc.title,
+        content=doc.content,
+        summary=summary,
+        source_domain=doc.source_domain,
+        language_used=language_used,
+        created_by=(req.created_by or "system").strip() or "system",
+    )
+    return {
+        "title": doc.title,
+        "summary": summary,
+        "url": doc.final_url,
+        "source_domain": doc.source_domain,
+        "ingested": True,
+        "cached": False,
+        "language_used": language_used,
+    }
+
+
 @app.post("/api/chat")
 def chat_with_briefs(req: ChatRequest):
     """Answer a user question based on recent brief content (no RAG/vector store needed)."""
@@ -1600,30 +2038,26 @@ def chat_with_briefs(req: ChatRequest):
     language_used = _normalize_language(req.language)
 
     try:
-        # Fetch recent briefs (topic-filtered or global)
-        all_briefs = DB.list_recent_briefs(limit=20, topic_id=req.topic_id)
-        briefs = [b for b in all_briefs if (b.get("created_at") or "") >= cutoff]
-
-        if not briefs:
-            return {"reply": "No recent briefs found for this query.", "sources": [], "language_used": language_used}
-
-        # Build context: up to 5 briefs, 1500 chars each, total cap 6000 chars
-        blocks: List[str] = []
-        total_chars = 0
-        for b in briefs[:5]:
-            content = (b.get("content") or "")[:1500]
-            if total_chars + len(content) > 6000:
+        context_layer = ""
+        context = ""
+        sources: List[str] = []
+        for builder in (
+            _build_brief_chat_context,
+            _build_article_chat_context,
+            _build_ingestion_chat_context,
+            _build_web_fallback_chat_context,
+        ):
+            context_layer, context, sources = builder(req)
+            if context:
                 break
-            date_label = b.get("date") or b.get("created_at", "")[:10]
-            topic_label = b.get("topic_name", f"Topic {b.get('topic_id', '')}")
-            blocks.append(f"[{date_label} | {topic_label}]\n{content}")
-            total_chars += len(content)
 
-        context = "\n\n---\n\n".join(blocks)
-        sources = [
-            f"{b.get('date') or (b.get('created_at', '')[:10])} | {b.get('topic_name', '')}"
-            for b in briefs[: len(blocks)]
-        ]
+        if not context:
+            return {
+                "reply": "No recent briefs, articles, or ingested pages matched this query.",
+                "sources": [],
+                "context_layer": "none",
+                "language_used": language_used,
+            }
 
         language_hint = {
             "Chinese (Simplified)": "Write in Simplified Chinese.",
@@ -1643,7 +2077,12 @@ def chat_with_briefs(req: ChatRequest):
         if reply is None:
             reply = "LLM is unavailable. Please try again later."
 
-        return {"reply": reply, "sources": sources, "language_used": language_used}
+        return {
+            "reply": reply,
+            "sources": sources,
+            "context_layer": context_layer,
+            "language_used": language_used,
+        }
     finally:
         with _chat_lock:
             _active_chat = max(_active_chat - 1, 0)

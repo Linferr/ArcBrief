@@ -15,7 +15,14 @@ class VolcEngineSearchTool(SearchTool):
             api_key=api_key,
             base_url=base_url,
             model=model_endpoint,
+            search_mode="plain_chat",
         )
+        self.search_mode = "plain_chat"
+        self.last_error_class = ""
+        self.last_error_message = ""
 
     def search(self, query: str, max_results: int = 5) -> SearchResponse:
-        return self.client.search(query, max_results=max_results)
+        response = self.client.search(query, max_results=max_results)
+        self.last_error_class = self.client.last_error_class
+        self.last_error_message = self.client.last_error_message
+        return response

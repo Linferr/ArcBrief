@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { apiFetch, downloadPdfResponse, markdownToPlainText, RecentBrief, Topic } from './api';
+import { apiFetch, downloadPdfResponse, RecentBrief, Topic } from './api';
+import MarkdownViewer from './MarkdownViewer';
 
 interface Props {
   topics: Topic[];
@@ -160,7 +161,7 @@ export default function ArchivesPanel({ topics }: Props) {
                 <span style={{ fontFamily: 'var(--font-serif)', fontSize: '15px', fontWeight: 'bold', color: 'var(--text-primary)' }}>{selectedBrief.topic_name}</span>
                 <span>{formatBriefTime(selectedBrief.created_at, selectedBrief.date)}</span>
               </div>
-              <pre className="brief-content" style={{ fontFamily: 'var(--font-serif)' }}>{markdownToPlainText(selectedBrief.content)}</pre>
+              <MarkdownViewer content={selectedBrief.content} />
             </div>
           ) : (
             <div className="muted" style={{ padding: '24px', background: 'var(--bg-sidebar)', border: '1px solid var(--border-color)', borderRadius: '4px' }}>Select a brief to preview content.</div>

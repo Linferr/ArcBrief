@@ -186,6 +186,7 @@ export default function Page() {
               onRunningChange={setResearchRunning}
               pendingQuery={pendingResearchQuery}
               onPendingQueryConsumed={handlePendingQueryConsumed}
+              isVisible={panel === 'research'}
             />
           </div>
           <div style={{ display: panel === 'settings' ? 'block' : 'none' }}>
