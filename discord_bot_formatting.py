@@ -13,7 +13,13 @@ _BRIEF_CORE_HEADERS = (
     "## 📌 今日核心 (TL;DR)",
     "## 📌 今日核心",
 )
-_BRIEF_SOURCES_HEADERS = ("## Sources", "## 来源", "## 来源索引", "## ソース", "## ソース索引")
+_BRIEF_SOURCES_HEADERS = (
+    "## Sources",
+    "## 来源",
+    "## 来源索引",
+    "## ソース",
+    "## ソース索引",
+)
 _RESEARCH_SECTION_HEADERS = (
     "## Latest Viewpoints",
     "## 最新观点",
@@ -100,13 +106,15 @@ def format_brief_mobile_message(brief: Dict[str, Any]) -> str:
     content = brief.get("content", "") or ""
     title = brief.get("topic_name") or _extract_title(content) or "Latest Brief"
     date = brief.get("date", "N/A")
+    brief_id = brief.get("id")
     tldr = _extract_section(content, _BRIEF_CORE_HEADERS)
     tldr_text = _truncate(_extract_first_paragraph(tldr or content), 260) or "No summary available."
     points = _extract_key_points(content)
     source_count = _count_sources(content)
 
     lines = [
-        f"**{title}** · {date}",
+        f"**{title}** | {date}",
+        f"Brief ID: {brief_id}" if brief_id is not None else "Brief ID: unavailable",
         f"TL;DR: {tldr_text}",
     ]
     if points:
@@ -121,8 +129,11 @@ def format_digest_mobile_message(items: List[Dict[str, Any]]) -> str:
     for item in items:
         summary = _extract_section(item.get("content", ""), _BRIEF_CORE_HEADERS)
         summary_text = _truncate(_extract_first_paragraph(summary or item.get("content", "")), 120)
+        brief_id = item.get("id")
         lines.append(
-            f"- {item.get('topic_name', 'Unknown')} ({item.get('date', 'N/A')}): {summary_text or 'No summary available.'}"
+            f"- [{brief_id if brief_id is not None else '?'}] "
+            f"{item.get('topic_name', 'Unknown')} ({item.get('date', 'N/A')}): "
+            f"{summary_text or 'No summary available.'}"
         )
     return "\n".join(lines)
 
@@ -149,7 +160,7 @@ def format_research_mobile_message(
     summary = _truncate(_extract_first_paragraph(section or report), 320) or "No summary available."
     source_count = _count_sources(report)
     lines = [
-        f"**Research complete** · `{run_id}`",
+        f"**Research complete** | `{run_id}`",
         f"Query: {query}",
         f"Language: {language}",
         "Section: Latest Viewpoints",
@@ -170,7 +181,7 @@ def format_analyze_mobile_message(
     section = _extract_section(report, _ANALYZE_SECTION_HEADERS)
     summary = _truncate(_extract_first_paragraph(section or report), 320) or "No summary available."
     lines = [
-        f"**Analysis complete** · `{run_id}`",
+        f"**Analysis complete** | `{run_id}`",
         f"Subject: {subject}",
         f"Language: {language}",
         "Section: Product Overview",
@@ -180,13 +191,35 @@ def format_analyze_mobile_message(
     return "\n".join(lines)
 
 
+def format_long_task_status_message(*, kind: str, run_id: str, status: str) -> str:
+    label = "Analysis" if kind == "analyze" else "Research"
+    normalized = (status or "running").lower()
+    if normalized == "done":
+        return (
+            f"{label} finished, but no report content is available yet.\n"
+            f"Run ID: `{run_id}`\n"
+            f"Check the web UI or `/api/status/{run_id}` for the final report."
+        )
+    if normalized == "error":
+        return (
+            f"{label} failed before producing report content.\n"
+            f"Run ID: `{run_id}`\n"
+            f"Check the web UI or `/api/status/{run_id}` for details."
+        )
+    return (
+        f"{label} is still running in the background.\n"
+        f"Run ID: `{run_id}`\n"
+        f"Check the web UI or `/api/status/{run_id}` for progress and the final report."
+    )
+
+
 def format_tldr_mobile_message(result: Dict[str, Any]) -> str:
     title = result.get("title") or "Untitled"
     summary = _truncate(result.get("summary", "No summary available."), 420)
     domain = result.get("source_domain") or "unknown"
     cached = "yes" if result.get("cached") else "no"
     lines = [
-        f"**TL;DR** · {title}",
+        f"**TL;DR** | {title}",
         summary,
         f"Source: {domain}",
         f"Cached: {cached}",

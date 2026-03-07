@@ -6,11 +6,12 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from discord_bot_formatting import (
-    format_bookmark_action_message,
     format_analyze_mobile_message,
     format_ask_mobile_message,
+    format_bookmark_action_message,
     format_brief_mobile_message,
     format_digest_mobile_message,
+    format_long_task_status_message,
     format_research_mobile_message,
     format_saved_mobile_message,
     format_tldr_mobile_message,
@@ -19,6 +20,7 @@ from discord_bot_formatting import (
 
 def test_format_brief_mobile_message_prioritizes_summary_over_full_markdown():
     brief = {
+        "id": 42,
         "topic_name": "AI Daily",
         "date": "2026-03-06",
         "content": """# 2026-03-06 AI Daily Daily Brief
@@ -43,6 +45,7 @@ Model launches and agent tooling updates dominated today's cycle, with faster re
     message = format_brief_mobile_message(brief)
 
     assert "AI Daily" in message
+    assert "Brief ID: 42" in message
     assert "TL;DR" in message
     assert "Key points" in message
     assert "Sources: 3" in message
@@ -53,11 +56,13 @@ Model launches and agent tooling updates dominated today's cycle, with faster re
 def test_format_digest_mobile_message_builds_compact_topic_list():
     items = [
         {
+            "id": 12,
             "topic_name": "AI Daily",
             "date": "2026-03-06",
             "content": "## 📌 Core TL;DR\nModel launches dominated the day.\n\n## Sources\n- A",
         },
         {
+            "id": 13,
             "topic_name": "Global Trending",
             "date": "2026-03-06",
             "content": "## 📌 Core TL;DR\nTrade negotiations remain unstable across regions.\n\n## Sources\n- A\n- B",
@@ -67,8 +72,8 @@ def test_format_digest_mobile_message_builds_compact_topic_list():
     message = format_digest_mobile_message(items)
 
     assert "**Daily Digest**" in message
-    assert "AI Daily" in message
-    assert "Global Trending" in message
+    assert "[12] AI Daily" in message
+    assert "[13] Global Trending" in message
     assert "Model launches dominated the day." in message
     assert "Trade negotiations remain unstable" in message
     assert "```" not in message
@@ -160,6 +165,16 @@ Competition is intensifying across Claude Code, Cursor, and OpenCode.
     assert "```" not in message
 
 
+def test_format_long_task_status_message_handles_running_and_done_states():
+    running = format_long_task_status_message(kind="research", run_id="run_123", status="running")
+    finished = format_long_task_status_message(kind="analyze", run_id="run_456", status="done")
+
+    assert "Research is still running in the background." in running
+    assert "run_123" in running
+    assert "Analysis finished, but no report content is available yet." in finished
+    assert "run_456" in finished
+
+
 def test_format_saved_mobile_message_handles_empty_state():
     message = format_saved_mobile_message([])
     assert message == "No saved briefs yet."
@@ -196,3 +211,4 @@ def test_format_bookmark_action_message_shows_save_and_delete_state():
     assert "Saved brief 12" in saved
     assert "watch this" in saved
     assert "Removed saved brief 12" in deleted
+

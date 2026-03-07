@@ -16,11 +16,13 @@ from discord_bot_formatting import (
     chunk_text,
     format_ask_mobile_message,
     format_brief_mobile_message,
+    format_long_task_status_message,
     format_saved_mobile_message,
     format_digest_mobile_message,
     format_research_mobile_message,
     format_tldr_mobile_message,
 )
+from discord_bot_helpers import resolve_topic_reference
 
 
 API_BASE = os.getenv("ARCBRIEF_API_BASE", "http://localhost:8000/api")
@@ -129,11 +131,18 @@ async def list_topics(interaction: discord.Interaction):
 
 
 @bot.tree.command(name="brief", description="Get latest brief for a topic")
-@app_commands.describe(topic_id="Topic ID shown in /topics")
-async def latest_brief(interaction: discord.Interaction, topic_id: int):
+@app_commands.describe(topic="Topic ID or topic name")
+async def latest_brief(interaction: discord.Interaction, topic: str):
     await interaction.response.defer(thinking=True)
     try:
-        brief = await api_get(f"/briefs/{topic_id}/latest")
+        topics = await api_get("/topics")
+        matched_topic, error_message = resolve_topic_reference(topic, topics)
+        if error_message:
+            await interaction.followup.send(error_message)
+            return
+        assert matched_topic is not None
+        brief = await api_get(f"/briefs/{matched_topic['id']}/latest")
+        brief["topic_name"] = matched_topic.get("name", brief.get("topic_name"))
         content = brief.get("content", "")
         if not content:
             await interaction.followup.send("No brief content.")
@@ -166,16 +175,20 @@ async def research(interaction: discord.Interaction, query: str, lang: Optional[
         await interaction.followup.send(f"Started research: `{run_id}` ({language}). Polling for completion...")
 
         report = ""
+        last_status = "running"
         for _ in range(180):
             status = await api_get(f"/status/{run_id}")
+            last_status = status.get("status") or last_status
             if status.get("report_content"):
                 report = status.get("report_content", "")
-            if status.get("status") == "done":
+            if last_status in {"done", "error"}:
                 break
             await asyncio.sleep(2)
 
         if not report:
-            await interaction.channel.send("No report content yet.")
+            await interaction.channel.send(
+                format_long_task_status_message(kind="research", run_id=run_id, status=last_status)
+            )
             return
 
         summary = format_research_mobile_message(
@@ -308,16 +321,20 @@ async def analyze(
         await interaction.followup.send(f"Started analysis: `{run_id}` ({language}). Polling for completion...")
 
         report = ""
+        last_status = "running"
         for _ in range(180):
             status = await api_get(f"/status/{run_id}")
+            last_status = status.get("status") or last_status
             if status.get("report_content"):
                 report = status.get("report_content", "")
-            if status.get("status") == "done":
+            if last_status in {"done", "error"}:
                 break
             await asyncio.sleep(2)
 
         if not report:
-            await interaction.channel.send("No analysis content yet.")
+            await interaction.channel.send(
+                format_long_task_status_message(kind="analyze", run_id=run_id, status=last_status)
+            )
             return
 
         summary = format_analyze_mobile_message(

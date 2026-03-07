@@ -1,0 +1,44 @@
+"""Tests for Discord bot command-resolution helpers."""
+
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from discord_bot_helpers import resolve_topic_reference
+
+
+TOPICS = [
+    {"id": 1, "name": "Global Trending"},
+    {"id": 3, "name": "AI Daily"},
+    {"id": 4, "name": "AI Policy & Safety"},
+]
+
+
+def test_resolve_topic_reference_accepts_numeric_topic_id():
+    topic, error = resolve_topic_reference("3", TOPICS)
+    assert error is None
+    assert topic is not None
+    assert topic["id"] == 3
+
+
+def test_resolve_topic_reference_accepts_topic_name():
+    topic, error = resolve_topic_reference("ai daily", TOPICS)
+    assert error is None
+    assert topic is not None
+    assert topic["name"] == "AI Daily"
+
+
+def test_resolve_topic_reference_reports_missing_topic():
+    topic, error = resolve_topic_reference("unknown topic", TOPICS)
+    assert topic is None
+    assert "Topic not found" in (error or "")
+
+
+def test_resolve_topic_reference_reports_multiple_matches():
+    topic, error = resolve_topic_reference("ai", TOPICS)
+    assert topic is None
+    assert "Multiple topics matched" in (error or "")
+    assert "3 | AI Daily" in (error or "")
+    assert "4 | AI Policy & Safety" in (error or "")
+
