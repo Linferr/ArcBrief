@@ -9,6 +9,7 @@ import aiohttp
 import discord
 from discord import app_commands
 
+from discord_bot_api import build_api_error_message
 from discord_bot_formatting import (
     format_bookmark_action_message,
     format_analyze_mobile_message,
@@ -40,7 +41,7 @@ async def api_get(path: str) -> Any:
             headers={"X-API-Key": API_KEY},
         ) as res:
             if res.status >= 400:
-                raise RuntimeError(f"GET {path} failed: {res.status}")
+                raise RuntimeError(build_api_error_message("GET", path, res.status, await res.text()))
             return await res.json()
 
 
@@ -52,7 +53,18 @@ async def api_post(path: str, payload: Optional[Dict[str, Any]] = None) -> Any:
             headers={"Content-Type": "application/json", "X-API-Key": API_KEY},
         ) as res:
             if res.status >= 400:
-                raise RuntimeError(f"POST {path} failed: {res.status}")
+                raise RuntimeError(build_api_error_message("POST", path, res.status, await res.text()))
+            return await res.json()
+
+
+async def api_delete(path: str) -> Any:
+    async with aiohttp.ClientSession() as session:
+        async with session.delete(
+            f"{API_BASE}{path}",
+            headers={"X-API-Key": API_KEY},
+        ) as res:
+            if res.status >= 400:
+                raise RuntimeError(build_api_error_message("DELETE", path, res.status, await res.text()))
             return await res.json()
 
 class ArcBriefBot(discord.Client):
@@ -359,14 +371,7 @@ async def saved_briefs(interaction: discord.Interaction):
 async def unsave_brief(interaction: discord.Interaction, brief_id: int):
     await interaction.response.defer(thinking=True)
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.delete(
-                f"{API_BASE}/bookmarks/discord:{interaction.user.id}/{brief_id}",
-                headers={"X-API-Key": API_KEY},
-            ) as res:
-                if res.status >= 400:
-                    raise RuntimeError(f"DELETE /bookmarks failed: {res.status}")
-                result = await res.json()
+        result = await api_delete(f"/bookmarks/discord:{interaction.user.id}/{brief_id}")
         await interaction.followup.send(
             format_bookmark_action_message(result.get("status", "deleted"), brief_id=brief_id)
         )

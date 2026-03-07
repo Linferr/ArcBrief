@@ -64,3 +64,14 @@ def test_create_tldr_rejects_localhost_and_private_targets(temp_db):
 
     assert exc.value.status_code == 400
     assert "public http/https URL" in str(exc.value.detail)
+
+
+def test_create_tldr_logs_fetch_failures(temp_db, monkeypatch, caplog):
+    monkeypatch.setattr(main, "fetch_tldr_document", lambda url: (_ for _ in ()).throw(RuntimeError("network boom")))
+
+    with pytest.raises(HTTPException) as exc:
+        main.create_tldr(main.TLDRRequest(url="https://example.com/fail"))
+
+    assert exc.value.status_code == 502
+    assert "Failed to fetch URL" in str(exc.value.detail)
+    assert "network boom" in caplog.text

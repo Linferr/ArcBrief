@@ -1998,6 +1998,7 @@ def create_tldr(req: TLDRRequest):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
+        logger.warning("TLDR fetch failed for %s: %s", safe_url, exc)
         raise HTTPException(status_code=502, detail=f"Failed to fetch URL: {exc}")
 
     summary = _summarize_ingested_document(doc.title, doc.content, language_used)
