@@ -9,7 +9,7 @@ import os
 import re
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -604,6 +604,13 @@ class BriefGenerateRequest(BaseModel):
 class DigestGenerateRequest(BaseModel):
     date: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
     language: Optional[str] = Field(default=None, max_length=64)
+
+
+class RefreshRequest(BaseModel):
+    scope: Literal["digest", "topic", "all"]
+    topic_id: Optional[int] = Field(default=None, gt=0)
+    language: Optional[str] = Field(default=None, max_length=64)
+    push: bool = True
 
 
 def _sanitize_query(query: str) -> str:
@@ -1527,6 +1534,55 @@ def _generate_and_store_daily_digest(date_str: str, language_used: str) -> Dict[
     return digest
 
 
+def _run_refresh_operation(payload: RefreshRequest) -> Dict[str, Any]:
+    if DB is None:
+        raise HTTPException(status_code=500, detail="DB not initialized")
+
+    language_used = _normalize_language(payload.language or DB.get_app_config().get("report_language"))
+
+    if payload.scope == "digest":
+        date_str = DB.get_latest_active_brief_date()
+        if not date_str:
+            raise HTTPException(status_code=404, detail="No briefs available for digest generation")
+        digest = _generate_and_store_daily_digest(date_str, language_used)
+        return {
+            "scope": "digest",
+            "language_used": language_used,
+            "digest": digest,
+            "pushed": bool(payload.push),
+        }
+
+    if payload.scope == "topic":
+        if payload.topic_id is None:
+            raise HTTPException(status_code=400, detail="topic_id is required when scope=topic")
+        collect_result = collect_topic(payload.topic_id)
+        brief_result = generate_brief(payload.topic_id, BriefGenerateRequest(language=language_used))
+        brief = latest_brief(payload.topic_id)
+        return {
+            "scope": "topic",
+            "language_used": language_used,
+            "collect": collect_result,
+            "brief_result": brief_result,
+            "brief": brief,
+            "pushed": bool(payload.push),
+        }
+
+    collect_result = collect_all()
+    briefs_result = generate_brief_all()
+    digest_date = str(briefs_result.get("date") or DB.get_latest_active_brief_date() or "")
+    if not digest_date:
+        raise HTTPException(status_code=404, detail="No briefs available after refresh")
+    digest = _generate_and_store_daily_digest(digest_date, language_used)
+    return {
+        "scope": "all",
+        "language_used": language_used,
+        "collect": collect_result,
+        "briefs": briefs_result,
+        "digest": digest,
+        "pushed": bool(payload.push),
+    }
+
+
 @app.post("/api/topics/{topic_id}/brief")
 def generate_brief(topic_id: int, payload: Optional[BriefGenerateRequest] = None):
     if DB is None:
@@ -1666,6 +1722,11 @@ def generate_daily_digest(payload: Optional[DigestGenerateRequest] = None):
     language_used = _normalize_language(payload.language if payload and payload.language else config.get("report_language"))
     digest = _generate_and_store_daily_digest(date_str, language_used)
     return digest
+
+
+@app.post("/api/ops/refresh")
+def refresh_ops(payload: RefreshRequest):
+    return _run_refresh_operation(payload)
 
 
 @app.get("/api/briefs/recent")

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, Optional, Tuple
+from typing import Any, Dict, Iterable, Optional, Set, Tuple
 
 
 def resolve_topic_reference(topic_ref: str, topics: Iterable[Dict[str, Any]]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
@@ -28,3 +28,15 @@ def resolve_topic_reference(topic_ref: str, topics: Iterable[Dict[str, Any]]) ->
         return None, f"Multiple topics matched: {options}"
     return matches[0], None
 
+
+def parse_admin_ids(raw: str) -> Set[int]:
+    values: Set[int] = set()
+    for token in (raw or "").split(","):
+        token = token.strip()
+        if token.isdigit():
+            values.add(int(token))
+    return values
+
+
+def is_discord_admin(user_id: int, raw_admin_ids: str) -> bool:
+    return int(user_id) in parse_admin_ids(raw_admin_ids)

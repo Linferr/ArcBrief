@@ -86,6 +86,11 @@ The Discord bot is positioned as a daily brief reading entry point plus a deep-a
 - `/tldr url:<public-url>`
   - Fetch a public article page and summarize it.
   - Repeated requests for the same URL use the cached ingestion record.
+- `/refresh scope:<digest|topic|all> topic?:<optional> lang?:<optional>`
+  - Admin-only manual refresh command.
+  - `digest`: regenerate the latest available full daily digest from existing briefs
+  - `topic`: recollect + regenerate one topic brief and push it to the current channel
+  - `all`: recollect all active topics, regenerate briefs, rebuild the daily digest, and push it to the current channel
 - `/research query:<text>`
   - Start a background deep-research run.
   - The bot polls for up to about 6 minutes, then falls back to a “still running in the background” status message if the report is not ready yet.
@@ -95,7 +100,7 @@ The Discord bot is positioned as a daily brief reading entry point plus a deep-a
 
 ### Synchronous vs background commands
 
-- Synchronous: `/topics`, `/brief`, `/digest`, `/ask`, `/tldr`
+- Synchronous: `/topics`, `/brief`, `/digest`, `/ask`, `/tldr`, `/refresh`
 - Background tasks with polling: `/research`, `/analyze`
 
 ### Concurrency limits
@@ -116,6 +121,9 @@ The Discord bot is positioned as a daily brief reading entry point plus a deep-a
 - Search provider
   - Controlled by backend app config: `search_provider`
   - Discord does not expose model/provider switching in this phase; change it in the web UI or backend config
+- Admin-only refresh
+  - Controlled by `DISCORD_ADMIN_IDS` in the bot environment
+  - Use a comma-separated list of Discord user IDs allowed to run `/refresh`
 
 ### Known limits
 
@@ -125,6 +133,7 @@ The Discord bot is positioned as a daily brief reading entry point plus a deep-a
 - `/brief` returns the latest saved brief currently in the database for that topic
 - `/digest` returns the latest available full daily digest, not necessarily “today” if a newer digest has not been generated yet
 - If `/brief` or `/digest` appear empty in the morning, first verify the deployed backend is using the expected persistent volume and still has the previous day’s SQLite data
+- `/refresh all` is intended for testing, manual recovery, and ad-hoc “get me the latest now” usage
 - Discord-side bookmarks are currently paused; the backend bookmark APIs remain in place but are not exposed through bot commands in this phase
 
 ## Portfolio Report

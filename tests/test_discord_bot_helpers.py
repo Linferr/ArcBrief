@@ -5,7 +5,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from discord_bot_helpers import resolve_topic_reference
+from discord_bot_helpers import is_discord_admin, parse_admin_ids, resolve_topic_reference
 
 
 TOPICS = [
@@ -42,3 +42,12 @@ def test_resolve_topic_reference_reports_multiple_matches():
     assert "3 | AI Daily" in (error or "")
     assert "4 | AI Policy & Safety" in (error or "")
 
+
+def test_parse_admin_ids_ignores_invalid_tokens():
+    parsed = parse_admin_ids("123, abc, 456 , ,789")
+    assert parsed == {123, 456, 789}
+
+
+def test_is_discord_admin_checks_membership():
+    assert is_discord_admin(42, "1,42,99")
+    assert not is_discord_admin(7, "1,42,99")

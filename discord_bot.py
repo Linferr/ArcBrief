@@ -18,12 +18,13 @@ from discord_bot_formatting import (
     format_research_mobile_message,
     format_tldr_mobile_message,
 )
-from discord_bot_helpers import resolve_topic_reference
+from discord_bot_helpers import is_discord_admin, resolve_topic_reference
 
 
 API_BASE = os.getenv("ARCBRIEF_API_BASE", "http://localhost:8000/api")
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
 API_KEY = os.getenv("ARCBRIEF_API_KEY", "arcbrief-local-dev-key")
+DISCORD_ADMIN_IDS = os.getenv("DISCORD_ADMIN_IDS", "")
 CONFIG_CACHE_TTL_SECONDS = 300
 LANGUAGE_MAP = {
     "en": "English (US)",
@@ -107,6 +108,35 @@ async def resolve_output_language(lang: Optional[str]) -> str:
     if lang and lang in LANGUAGE_MAP:
         return LANGUAGE_MAP[lang]
     return await bot.get_default_language()
+
+
+def _refresh_summary_message(result: Dict[str, Any]) -> str:
+    scope = result.get("scope", "unknown")
+    if scope == "topic":
+        collect = result.get("collect", {}) or {}
+        brief = result.get("brief_result", {}) or {}
+        topic_name = collect.get("topic_name") or brief.get("topic_name") or "Unknown"
+        return (
+            f"Refresh complete for {topic_name}.\n"
+            f"Collected: {collect.get('collected', 0)} | Saved: {collect.get('saved', 0)} | "
+            f"Brief date: {brief.get('date', 'N/A')}"
+        )
+
+    digest = result.get("digest", {}) or {}
+    if scope == "digest":
+        return (
+            f"Digest regenerated for {digest.get('date', 'N/A')}.\n"
+            f"Topic count: {digest.get('topic_count', 0)} | "
+            f"Missing topics: {len(digest.get('missing_topics', []) or [])}"
+        )
+
+    collect = result.get("collect", {}) or {}
+    briefs = result.get("briefs", {}) or {}
+    return (
+        f"Full refresh complete for {digest.get('date', 'N/A')}.\n"
+        f"Collected: {collect.get('total_collected', 0)} | Saved: {collect.get('total_saved', 0)} | "
+        f"Briefs: {briefs.get('total_topics', 0)}"
+    )
 
 
 @bot.tree.command(name="topics", description="List ArcBrief topics with status")
@@ -261,6 +291,78 @@ async def digest(interaction: discord.Interaction):
             await interaction.channel.send(chunk)
     except Exception as e:
         await interaction.followup.send(f"Error: {e}")
+
+
+@bot.tree.command(name="refresh", description="Admin-only: regenerate and push the latest digest or topic brief")
+@app_commands.describe(
+    scope="digest = regenerate digest, topic = refresh one topic, all = collect all + brief all + digest",
+    topic="Topic ID or topic name when scope=topic",
+    lang="Output language (optional)",
+)
+@app_commands.choices(
+    scope=[
+        app_commands.Choice(name="digest", value="digest"),
+        app_commands.Choice(name="topic", value="topic"),
+        app_commands.Choice(name="all", value="all"),
+    ],
+    lang=[
+        app_commands.Choice(name="English", value="en"),
+        app_commands.Choice(name="中文", value="zh"),
+        app_commands.Choice(name="日本語", value="ja"),
+    ],
+)
+async def refresh(
+    interaction: discord.Interaction,
+    scope: app_commands.Choice[str],
+    topic: Optional[str] = None,
+    lang: Optional[app_commands.Choice[str]] = None,
+):
+    if not is_discord_admin(interaction.user.id, DISCORD_ADMIN_IDS):
+        await interaction.response.send_message("This command is admin-only.", ephemeral=True)
+        return
+
+    await interaction.response.defer(thinking=True)
+    try:
+        language = await resolve_output_language(lang.value if lang else None)
+        payload: Dict[str, Any] = {"scope": scope.value, "language": language, "push": True}
+        if scope.value == "topic":
+            if not topic:
+                await interaction.followup.send("topic is required when scope=topic")
+                return
+            topics = await api_get("/topics")
+            matched_topic, error_message = resolve_topic_reference(topic, topics)
+            if error_message:
+                await interaction.followup.send(error_message)
+                return
+            assert matched_topic is not None
+            payload["topic_id"] = matched_topic["id"]
+
+        result = await api_post("/ops/refresh", payload)
+        await interaction.followup.send(_refresh_summary_message(result))
+
+        if scope.value == "topic":
+            brief = result.get("brief") or {}
+            content = (brief.get("content") or "").strip()
+            if content:
+                await interaction.channel.send(
+                    f"Latest brief for **{brief.get('topic_name', 'Unknown')}** ({brief.get('date', 'N/A')})"
+                )
+                for chunk in chunk_text(content):
+                    await interaction.channel.send(chunk)
+            return
+
+        digest_doc = result.get("digest") or {}
+        content = (digest_doc.get("content") or "").strip()
+        if content:
+            header = f"Daily Digest | {digest_doc.get('date', 'N/A')}"
+            missing_topics = digest_doc.get("missing_topics") or []
+            if missing_topics:
+                header += f"\nMissing topics: {', '.join(missing_topics)}"
+            await interaction.channel.send(header)
+            for chunk in chunk_text(content):
+                await interaction.channel.send(chunk)
+    except Exception as e:
+        await interaction.followup.send(f"Refresh failed: {e}")
 
 
 @bot.tree.command(name="tldr", description="Fetch a URL and return a mobile-friendly summary")
