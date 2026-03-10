@@ -1568,7 +1568,7 @@ def _run_refresh_operation(payload: RefreshRequest) -> Dict[str, Any]:
         }
 
     collect_result = collect_all()
-    briefs_result = generate_brief_all()
+    briefs_result = generate_brief_all(BriefGenerateRequest(language=language_used))
     digest_date = str(briefs_result.get("date") or DB.get_latest_active_brief_date() or "")
     if not digest_date:
         raise HTTPException(status_code=404, detail="No briefs available after refresh")
@@ -1663,13 +1663,18 @@ def collect_all():
 
 
 @app.post("/api/topics/brief_all")
-def generate_brief_all():
+def generate_brief_all(payload: Optional[BriefGenerateRequest] = None):
     if DB is None:
         raise HTTPException(status_code=500, detail="DB not initialized")
     results = []
     date_str = datetime.now().strftime("%Y-%m-%d")
     config = DB.get_app_config()
     merged_config = {**APP_CONFIG_DEFAULTS, **config}
+    requested_language = _normalize_language(payload.language if payload else None)
+    if payload and payload.language:
+        merged_config["report_language"] = requested_language
+    else:
+        requested_language = _normalize_language(merged_config.get("report_language"))
     for topic in DB.list_topics():
         if not topic.is_active:
             continue
@@ -1678,7 +1683,7 @@ def generate_brief_all():
         brief = build_brief_for_topic(topic, items, source_weights=source_weights, app_config=merged_config)
         DB.save_brief(topic.id, date_str, brief, len(items))
         results.append({"topic_id": topic.id, "topic_name": topic.name, "items": len(items)})
-    return {"date": date_str, "total_topics": len(results), "results": results}
+    return {"date": date_str, "total_topics": len(results), "results": results, "language_used": requested_language}
 
 
 @app.get("/api/digest/latest")

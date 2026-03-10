@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 
 def resolve_topic_reference(topic_ref: str, topics: Iterable[Dict[str, Any]]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
@@ -40,3 +40,43 @@ def parse_admin_ids(raw: str) -> Set[int]:
 
 def is_discord_admin(user_id: int, raw_admin_ids: str) -> bool:
     return int(user_id) in parse_admin_ids(raw_admin_ids)
+
+
+def build_topic_autocomplete_matches(
+    current: str,
+    topics: Iterable[Dict[str, Any]],
+    limit: int = 25,
+) -> List[Tuple[str, str]]:
+    """Build autocomplete pairs of (display_name, value) for topic-like arguments."""
+    topic_list = list(topics or [])
+    query = (current or "").strip().lower()
+
+    def score(topic: Dict[str, Any]) -> Tuple[int, str]:
+        topic_id = str(topic.get("id", ""))
+        name = str(topic.get("name", ""))
+        lowered = name.lower()
+        if not query:
+            return (0, lowered)
+        if topic_id == query:
+            return (0, lowered)
+        if lowered == query:
+            return (1, lowered)
+        if lowered.startswith(query):
+            return (2, lowered)
+        if query in lowered:
+            return (3, lowered)
+        if topic_id.startswith(query):
+            return (4, lowered)
+        return (99, lowered)
+
+    filtered = [topic for topic in topic_list if score(topic)[0] < 99]
+    if not query:
+        filtered = topic_list
+    filtered.sort(key=score)
+
+    matches: List[Tuple[str, str]] = []
+    for topic in filtered[:limit]:
+        topic_id = str(topic.get("id", ""))
+        name = str(topic.get("name", ""))
+        matches.append((f"{topic_id} | {name}", name))
+    return matches

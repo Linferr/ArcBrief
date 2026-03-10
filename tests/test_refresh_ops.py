@@ -69,7 +69,13 @@ def test_refresh_ops_all_runs_collect_brief_and_digest(tmp_path, monkeypatch):
     _seed_topic(db, "AI Daily")
     monkeypatch.setattr(main, "DB", db)
     monkeypatch.setattr(main, "collect_all", lambda: {"total_collected": 12, "total_saved": 10})
-    monkeypatch.setattr(main, "generate_brief_all", lambda: {"date": "2026-03-10", "total_topics": 1, "results": []})
+    captured = {}
+
+    def fake_generate_brief_all(payload=None):
+        captured["language"] = getattr(payload, "language", None)
+        return {"date": "2026-03-10", "total_topics": 1, "results": [], "language_used": getattr(payload, "language", None)}
+
+    monkeypatch.setattr(main, "generate_brief_all", fake_generate_brief_all)
     monkeypatch.setattr(
         main,
         "_generate_and_store_daily_digest",
@@ -81,10 +87,11 @@ def test_refresh_ops_all_runs_collect_brief_and_digest(tmp_path, monkeypatch):
         },
     )
 
-    result = main.refresh_ops(main.RefreshRequest(scope="all", language="English (US)"))
+    result = main.refresh_ops(main.RefreshRequest(scope="all", language="Chinese (Simplified)"))
 
     assert result["scope"] == "all"
     assert result["collect"]["total_collected"] == 12
     assert result["briefs"]["date"] == "2026-03-10"
+    assert result["briefs"]["language_used"] == "Chinese (Simplified)"
+    assert captured["language"] == "Chinese (Simplified)"
     assert result["digest"]["date"] == "2026-03-10"
-

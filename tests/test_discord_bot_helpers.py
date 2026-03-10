@@ -5,7 +5,12 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from discord_bot_helpers import is_discord_admin, parse_admin_ids, resolve_topic_reference
+from discord_bot_helpers import (
+    build_topic_autocomplete_matches,
+    is_discord_admin,
+    parse_admin_ids,
+    resolve_topic_reference,
+)
 
 
 TOPICS = [
@@ -51,3 +56,14 @@ def test_parse_admin_ids_ignores_invalid_tokens():
 def test_is_discord_admin_checks_membership():
     assert is_discord_admin(42, "1,42,99")
     assert not is_discord_admin(7, "1,42,99")
+
+
+def test_build_topic_autocomplete_matches_prefers_name_matches():
+    matches = build_topic_autocomplete_matches("ai", TOPICS)
+    assert matches[0] == ("3 | AI Daily", "AI Daily")
+    assert matches[1] == ("4 | AI Policy & Safety", "AI Policy & Safety")
+
+
+def test_build_topic_autocomplete_matches_supports_numeric_lookup():
+    matches = build_topic_autocomplete_matches("3", TOPICS)
+    assert matches[0] == ("3 | AI Daily", "AI Daily")

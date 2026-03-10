@@ -19,6 +19,7 @@ from discord_bot_formatting import (
     format_tldr_mobile_message,
 )
 from discord_bot_helpers import is_discord_admin, resolve_topic_reference
+from discord_bot_helpers import build_topic_autocomplete_matches
 
 
 API_BASE = os.getenv("ARCBRIEF_API_BASE", "http://localhost:8000/api")
@@ -104,6 +105,18 @@ class ArcBriefBot(discord.Client):
 bot = ArcBriefBot()
 
 
+async def topic_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> List[app_commands.Choice[str]]:
+    try:
+        topics = await api_get("/topics")
+    except Exception:
+        return []
+    matches = build_topic_autocomplete_matches(current, topics)
+    return [app_commands.Choice(name=name, value=value) for name, value in matches]
+
+
 async def resolve_output_language(lang: Optional[str]) -> str:
     if lang and lang in LANGUAGE_MAP:
         return LANGUAGE_MAP[lang]
@@ -180,6 +193,14 @@ async def latest_brief(interaction: discord.Interaction, topic: str):
             await interaction.channel.send(chunk)
     except Exception as e:
         await interaction.followup.send(f"Failed to get brief: {e}")
+
+
+@latest_brief.autocomplete("topic")
+async def latest_brief_topic_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> List[app_commands.Choice[str]]:
+    return await topic_autocomplete(interaction, current)
 
 
 @bot.tree.command(name="research", description="Run a deep research query")
@@ -273,6 +294,14 @@ async def ask(
         await interaction.followup.send(chunk)
 
 
+@ask.autocomplete("topic")
+async def ask_topic_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> List[app_commands.Choice[str]]:
+    return await topic_autocomplete(interaction, current)
+
+
 @bot.tree.command(name="digest", description="Get the latest full daily digest across active topics")
 async def digest(interaction: discord.Interaction):
     await interaction.response.defer(thinking=True)
@@ -363,6 +392,14 @@ async def refresh(
                 await interaction.channel.send(chunk)
     except Exception as e:
         await interaction.followup.send(f"Refresh failed: {e}")
+
+
+@refresh.autocomplete("topic")
+async def refresh_topic_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> List[app_commands.Choice[str]]:
+    return await topic_autocomplete(interaction, current)
 
 
 @bot.tree.command(name="tldr", description="Fetch a URL and return a mobile-friendly summary")
