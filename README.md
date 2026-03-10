@@ -64,19 +64,18 @@ npm run dev
 
 ## Discord Bot Guide
 
-The Discord bot is optimized for quick mobile consumption. It favors short summaries over full markdown dumps.
+The Discord bot is positioned as a daily brief reading entry point plus a deep-analysis entry point.
 
 ### Commands
 
 - `/topics`
   - List all configured topics with `id | name` and active/paused status.
 - `/brief topic:<id-or-name>`
-  - Get the latest saved brief for a topic.
+  - Get the latest full brief for a topic.
   - Accepts either a numeric topic id like `3` or a topic name fragment like `ai daily`.
-  - The response now includes `Brief ID`, which is the value used by `/save`.
 - `/digest`
-  - Show the latest brief summary for each topic in one compact list.
-  - Each digest line now includes the `brief_id`.
+  - Show the latest available full daily digest across active topics.
+  - This is not a topic list; it is a single cross-topic daily summary.
 - `/ask question:<text> topic?:<optional>`
   - Ask a question against ArcBrief context.
   - The bot will label which context layer answered the question:
@@ -93,17 +92,10 @@ The Discord bot is optimized for quick mobile consumption. It favors short summa
 - `/analyze product:<text>`
   - Start a background PM-style analysis run.
   - This uses the same long-running pipeline as `/research`, but rewrites the result into a product/company analysis structure.
-- `/save brief_id:<id> note?:<optional>`
-  - Save an existing brief for later review.
-  - A brief does not need to be from “today”; any stored `brief_id` can be saved.
-- `/saved`
-  - List your saved briefs.
-- `/unsave brief_id:<id>`
-  - Remove a saved brief.
 
 ### Synchronous vs background commands
 
-- Synchronous: `/topics`, `/brief`, `/digest`, `/ask`, `/tldr`, `/save`, `/saved`, `/unsave`
+- Synchronous: `/topics`, `/brief`, `/digest`, `/ask`, `/tldr`
 - Background tasks with polling: `/research`, `/analyze`
 
 ### Concurrency limits
@@ -128,10 +120,12 @@ The Discord bot is optimized for quick mobile consumption. It favors short summa
 ### Known limits
 
 - `/tldr` can fail on sites that block server-side fetches, for example via `403 Forbidden`
-- `/save` depends on a visible `brief_id`; use the ids shown in `/brief`, `/digest`, or `/saved`
+- Landing pages and marketing pages can produce low-signal summaries even when `/tldr` succeeds
 - If `/research` or `/analyze` exceed the bot’s polling window, the backend job may still continue and finish later
 - `/brief` returns the latest saved brief currently in the database for that topic
+- `/digest` returns the latest available full daily digest, not necessarily “today” if a newer digest has not been generated yet
 - If `/brief` or `/digest` appear empty in the morning, first verify the deployed backend is using the expected persistent volume and still has the previous day’s SQLite data
+- Discord-side bookmarks are currently paused; the backend bookmark APIs remain in place but are not exposed through bot commands in this phase
 
 ## Portfolio Report
 

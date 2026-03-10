@@ -601,6 +601,11 @@ class BriefGenerateRequest(BaseModel):
     language: Optional[str] = Field(default=None, max_length=64)
 
 
+class DigestGenerateRequest(BaseModel):
+    date: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    language: Optional[str] = Field(default=None, max_length=64)
+
+
 def _sanitize_query(query: str) -> str:
     """Strip common prompt injection patterns from user query."""
     sanitized = query
@@ -1446,6 +1451,82 @@ def _load_brief_items(topic_id: int, date_str: str) -> List[Dict]:
     return DB.get_recent_articles(topic_id, hours=brief_hours)
 
 
+def _fallback_daily_digest_content(date_str: str, briefs: List[Dict[str, Any]], missing_topics: List[str]) -> str:
+    lines = [
+        f"# Daily Digest | {date_str}",
+        "",
+        "## Executive Summary",
+        f"This digest summarizes {len(briefs)} active topics for {date_str}.",
+        "",
+        "## Topic Highlights",
+    ]
+    for brief in briefs:
+        topic_name = brief.get("topic_name", f"Topic {brief.get('topic_id', '')}")
+        content = (brief.get("content") or "").strip()
+        snippet = content.split("\n\n", 2)[1] if "\n\n" in content else content
+        snippet = snippet.strip() or "No summary available."
+        lines.extend([
+            f"### {topic_name}",
+            snippet[:1200],
+            "",
+        ])
+    if missing_topics:
+        lines.extend([
+            "## Missing Topics",
+            *[f"- {name}" for name in missing_topics],
+            "",
+        ])
+    return "\n".join(lines).strip()
+
+
+def _build_daily_digest_content(date_str: str, briefs: List[Dict[str, Any]], missing_topics: List[str], language_used: str) -> str:
+    blocks: List[str] = []
+    for brief in briefs:
+        topic_name = brief.get("topic_name", f"Topic {brief.get('topic_id', '')}")
+        content = (brief.get("content") or "").strip()
+        blocks.append(f"[{topic_name}]\n{content[:5000]}")
+
+    if not blocks:
+        return _fallback_daily_digest_content(date_str, briefs, missing_topics)
+
+    missing_text = ", ".join(missing_topics) if missing_topics else "None"
+    prompt = (
+        "You are writing a complete daily intelligence digest for Discord readers. "
+        "Return markdown with these sections only: "
+        "'# Daily Digest | <date>', '## Executive Summary', '## Topic Highlights', and optionally '## Missing Topics'. "
+        "Write a full digest article, not a one-line summary. "
+        "Synthesize the most important developments across topics, preserve topic distinctions, and keep the output readable in Discord. "
+        f"Write in {language_used}."
+    )
+    user = (
+        f"Date: {date_str}\n"
+        f"Missing active topics: {missing_text}\n\n"
+        "Topic briefs:\n\n"
+        + "\n\n---\n\n".join(blocks)
+    )
+    content = (llm_chat(prompt, user) or "").strip()
+    if not content:
+        return _fallback_daily_digest_content(date_str, briefs, missing_topics)
+    return content
+
+
+def _generate_and_store_daily_digest(date_str: str, language_used: str) -> Dict[str, Any]:
+    if DB is None:
+        raise HTTPException(status_code=500, detail="DB not initialized")
+    briefs = DB.list_briefs_for_date(date_str, active_only=True)
+    if not briefs:
+        raise HTTPException(status_code=404, detail="No briefs found for requested date")
+    active_topics = DB.list_active_topic_names()
+    present_topics = {str(brief.get("topic_name") or "") for brief in briefs}
+    missing_topics = [name for name in active_topics if name not in present_topics]
+    content = _build_daily_digest_content(date_str, briefs, missing_topics, language_used)
+    DB.save_daily_digest(date_str, content, len(briefs), missing_topics)
+    digest = DB.get_daily_digest(date_str)
+    if not digest:
+        raise HTTPException(status_code=500, detail="Failed to save daily digest")
+    return digest
+
+
 @app.post("/api/topics/{topic_id}/brief")
 def generate_brief(topic_id: int, payload: Optional[BriefGenerateRequest] = None):
     if DB is None:
@@ -1542,6 +1623,49 @@ def generate_brief_all():
         DB.save_brief(topic.id, date_str, brief, len(items))
         results.append({"topic_id": topic.id, "topic_name": topic.name, "items": len(items)})
     return {"date": date_str, "total_topics": len(results), "results": results}
+
+
+@app.get("/api/digest/latest")
+def get_latest_digest():
+    if DB is None:
+        raise HTTPException(status_code=500, detail="DB not initialized")
+    latest_date = DB.get_latest_active_brief_date()
+    if not latest_date:
+        raise HTTPException(status_code=404, detail="No briefs available for digest generation")
+    digest = DB.get_daily_digest(latest_date)
+    if digest is None:
+        config = DB.get_app_config()
+        language_used = _normalize_language(config.get("report_language"))
+        digest = _generate_and_store_daily_digest(latest_date, language_used)
+    return digest
+
+
+@app.get("/api/digest/{date_str}")
+def get_digest_by_date(date_str: str):
+    if DB is None:
+        raise HTTPException(status_code=500, detail="DB not initialized")
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_str or ""):
+        raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
+    digest = DB.get_daily_digest(date_str)
+    if digest is None:
+        config = DB.get_app_config()
+        language_used = _normalize_language(config.get("report_language"))
+        digest = _generate_and_store_daily_digest(date_str, language_used)
+    return digest
+
+
+@app.post("/api/digest/generate")
+def generate_daily_digest(payload: Optional[DigestGenerateRequest] = None):
+    if DB is None:
+        raise HTTPException(status_code=500, detail="DB not initialized")
+    requested_date = payload.date if payload else None
+    date_str = requested_date or DB.get_latest_active_brief_date()
+    if not date_str:
+        raise HTTPException(status_code=404, detail="No briefs available for digest generation")
+    config = DB.get_app_config()
+    language_used = _normalize_language(payload.language if payload and payload.language else config.get("report_language"))
+    digest = _generate_and_store_daily_digest(date_str, language_used)
+    return digest
 
 
 @app.get("/api/briefs/recent")

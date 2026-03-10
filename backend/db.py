@@ -75,6 +75,17 @@ class ArcBriefDB:
                 )
             """)
             conn.execute("""
+                CREATE TABLE IF NOT EXISTS daily_digests (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    date TEXT NOT NULL UNIQUE,
+                    content TEXT NOT NULL,
+                    topic_count INTEGER DEFAULT 0,
+                    missing_topics TEXT DEFAULT '[]',
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS clusters (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     brief_id INTEGER NOT NULL,
@@ -553,14 +564,106 @@ class ArcBriefDB:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT * FROM briefs
-                WHERE topic_id = ?
-                ORDER BY date DESC
+                SELECT b.*, t.name AS topic_name
+                FROM briefs b
+                JOIN topics t ON t.id = b.topic_id
+                WHERE b.topic_id = ?
+                ORDER BY b.date DESC
                 LIMIT 1
                 """,
                 (topic_id,),
             ).fetchone()
         return dict(row) if row else None
+
+    def get_latest_active_brief_date(self) -> Optional[str]:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT MAX(b.date) AS latest_date
+                FROM briefs b
+                JOIN topics t ON t.id = b.topic_id
+                WHERE t.is_active = 1
+                """
+            ).fetchone()
+        latest_date = row["latest_date"] if row else None
+        return str(latest_date) if latest_date else None
+
+    def list_briefs_for_date(self, date_str: str, active_only: bool = True) -> List[Dict[str, Any]]:
+        with self._connect() as conn:
+            if active_only:
+                rows = conn.execute(
+                    """
+                    SELECT b.*, t.name AS topic_name, t.is_active
+                    FROM briefs b
+                    JOIN topics t ON t.id = b.topic_id
+                    WHERE b.date = ? AND t.is_active = 1
+                    ORDER BY t.name ASC
+                    """,
+                    (date_str,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT b.*, t.name AS topic_name, t.is_active
+                    FROM briefs b
+                    JOIN topics t ON t.id = b.topic_id
+                    WHERE b.date = ?
+                    ORDER BY t.name ASC
+                    """,
+                    (date_str,),
+                ).fetchall()
+        return [dict(r) for r in rows]
+
+    def save_daily_digest(self, date_str: str, content: str, topic_count: int, missing_topics: List[str]) -> None:
+        payload = json.dumps(missing_topics or [], ensure_ascii=False)
+        with self._connect() as conn:
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO daily_digests (date, content, topic_count, missing_topics)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (date_str, content, topic_count, payload),
+                )
+            except sqlite3.IntegrityError:
+                conn.execute(
+                    """
+                    UPDATE daily_digests
+                    SET content = ?, topic_count = ?, missing_topics = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE date = ?
+                    """,
+                    (content, topic_count, payload, date_str),
+                )
+
+    def get_daily_digest(self, date_str: str) -> Optional[Dict[str, Any]]:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM daily_digests WHERE date = ?",
+                (date_str,),
+            ).fetchone()
+        if not row:
+            return None
+        data = dict(row)
+        data["missing_topics"] = json.loads(data.get("missing_topics") or "[]")
+        return data
+
+    def get_latest_daily_digest(self) -> Optional[Dict[str, Any]]:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM daily_digests ORDER BY date DESC LIMIT 1"
+            ).fetchone()
+        if not row:
+            return None
+        data = dict(row)
+        data["missing_topics"] = json.loads(data.get("missing_topics") or "[]")
+        return data
+
+    def list_active_topic_names(self) -> List[str]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT name FROM topics WHERE is_active = 1 ORDER BY name ASC"
+            ).fetchall()
+        return [str(r["name"]) for r in rows]
 
     def list_briefs(self, topic_id: int, limit: int = 14, since_hours: Optional[int] = None) -> List[Dict[str, Any]]:
         with self._connect() as conn:

@@ -11,14 +11,10 @@ from discord import app_commands
 
 from discord_bot_api import build_api_error_message
 from discord_bot_formatting import (
-    format_bookmark_action_message,
     format_analyze_mobile_message,
     chunk_text,
     format_ask_mobile_message,
-    format_brief_mobile_message,
     format_long_task_status_message,
-    format_saved_mobile_message,
-    format_digest_mobile_message,
     format_research_mobile_message,
     format_tldr_mobile_message,
 )
@@ -130,7 +126,7 @@ async def list_topics(interaction: discord.Interaction):
         await interaction.followup.send(f"Failed to load topics: {e}")
 
 
-@bot.tree.command(name="brief", description="Get latest brief for a topic")
+@bot.tree.command(name="brief", description="Get the latest full brief for a topic")
 @app_commands.describe(topic="Topic ID or topic name")
 async def latest_brief(interaction: discord.Interaction, topic: str):
     await interaction.response.defer(thinking=True)
@@ -147,8 +143,11 @@ async def latest_brief(interaction: discord.Interaction, topic: str):
         if not content:
             await interaction.followup.send("No brief content.")
             return
-        message = format_brief_mobile_message(brief)
-        await interaction.followup.send(message)
+        header = f"Latest brief for **{brief.get('topic_name', 'Unknown')}** ({brief.get('date', 'N/A')})"
+        chunks = chunk_text(content)
+        await interaction.followup.send(header)
+        for chunk in chunks:
+            await interaction.channel.send(chunk)
     except Exception as e:
         await interaction.followup.send(f"Failed to get brief: {e}")
 
@@ -244,23 +243,22 @@ async def ask(
         await interaction.followup.send(chunk)
 
 
-@bot.tree.command(name="digest", description="Get the latest brief summary for each active topic")
+@bot.tree.command(name="digest", description="Get the latest full daily digest across active topics")
 async def digest(interaction: discord.Interaction):
     await interaction.response.defer(thinking=True)
     try:
-        data = await api_get("/briefs/recent?limit=40")
-        items = data.get("items", [])
-        # One per topic — list is ordered by created_at DESC, first occurrence = latest
-        seen: Dict[int, Any] = {}
-        for b in items:
-            tid = b.get("topic_id")
-            if tid is not None and tid not in seen:
-                seen[tid] = b
-        if not seen:
-            await interaction.followup.send("No briefs available yet.")
+        digest_doc = await api_get("/digest/latest")
+        content = (digest_doc.get("content") or "").strip()
+        if not content:
+            await interaction.followup.send("No daily digest content is available yet.")
             return
-        message = format_digest_mobile_message(list(seen.values()))
-        await interaction.followup.send(message)
+        header = f"Daily Digest | {digest_doc.get('date', 'N/A')}"
+        missing_topics = digest_doc.get("missing_topics") or []
+        if missing_topics:
+            header += f"\nMissing topics: {', '.join(missing_topics)}"
+        await interaction.followup.send(header)
+        for chunk in chunk_text(content):
+            await interaction.channel.send(chunk)
     except Exception as e:
         await interaction.followup.send(f"Error: {e}")
 
@@ -347,53 +345,6 @@ async def analyze(
 
     except Exception as e:
         await interaction.followup.send(f"Analyze failed: {e}")
-
-
-@bot.tree.command(name="save", description="Save a brief for later review")
-@app_commands.describe(brief_id="Brief ID to save", note="Optional note")
-async def save_brief(
-    interaction: discord.Interaction,
-    brief_id: int,
-    note: Optional[str] = None,
-):
-    await interaction.response.defer(thinking=True)
-    try:
-        result = await api_post(
-            "/bookmarks",
-            {
-                "user_id": f"discord:{interaction.user.id}",
-                "brief_id": brief_id,
-                "note": note,
-            },
-        )
-        await interaction.followup.send(
-            format_bookmark_action_message(result.get("status", "saved"), brief_id=brief_id, note=note)
-        )
-    except Exception as e:
-        await interaction.followup.send(f"Save failed: {e}")
-
-
-@bot.tree.command(name="saved", description="List your saved briefs")
-async def saved_briefs(interaction: discord.Interaction):
-    await interaction.response.defer(thinking=True)
-    try:
-        result = await api_get(f"/bookmarks/discord:{interaction.user.id}")
-        await interaction.followup.send(format_saved_mobile_message(result.get("items", [])))
-    except Exception as e:
-        await interaction.followup.send(f"Load saved briefs failed: {e}")
-
-
-@bot.tree.command(name="unsave", description="Remove a saved brief")
-@app_commands.describe(brief_id="Brief ID to remove from saved items")
-async def unsave_brief(interaction: discord.Interaction, brief_id: int):
-    await interaction.response.defer(thinking=True)
-    try:
-        result = await api_delete(f"/bookmarks/discord:{interaction.user.id}/{brief_id}")
-        await interaction.followup.send(
-            format_bookmark_action_message(result.get("status", "deleted"), brief_id=brief_id)
-        )
-    except Exception as e:
-        await interaction.followup.send(f"Unsave failed: {e}")
 
 
 def main():
