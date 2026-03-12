@@ -3,15 +3,18 @@
 import { useEffect, useMemo, useState } from 'react';
 import { apiFetch, downloadPdfResponse, markdownToPlainText, Topic, Brief, RecentBrief, Article } from './api';
 import MarkdownViewer from './MarkdownViewer';
-import { buildOnboardingModel, pickTodayNextAction, type NextActionCandidate } from './onboarding';
 import { computeDigestHealth, computeTopicHealth, healthStateClassName } from './healthState';
-import { buildRevisitRecommendations, type RevisitBriefCandidate } from './revisit';
+import { runBriefRefreshAll } from './briefRefresh';
 
 interface Props {
   topics: Topic[];
   onNavigateSettings: () => void;
   onNavigateArchive: () => void;
   onSendToResearch?: (query: string) => void;
+  requestedTopicId?: number | null;
+  requestedBriefId?: number | null;
+  onRequestedTopicHandled?: () => void;
+  refreshToken?: number;
 }
 
 type ActiveTopicKey = number | 'all';
@@ -261,7 +264,16 @@ export const parseBriefView = (content: string): ParsedBriefView => {
   };
 };
 
-export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateArchive, onSendToResearch }: Props) {
+export default function NewsFeedPanel({
+  topics,
+  onNavigateSettings,
+  onNavigateArchive,
+  onSendToResearch,
+  requestedTopicId = null,
+  requestedBriefId = null,
+  onRequestedTopicHandled,
+  refreshToken = 0,
+}: Props) {
   const allowAdminActions = process.env.NEXT_PUBLIC_ARCBRIEF_ENABLE_ADMIN_ACTIONS !== '0';
   const [activeTopic, setActiveTopic] = useState<ActiveTopicKey>('all');
   const [briefHistory, setBriefHistory] = useState<Brief[]>([]);
@@ -462,29 +474,21 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
     setRefreshStats(null);
     setNotice('');
     try {
-      const collectRes = await apiFetch('/topics/collect_all', { method: 'POST' });
-      if (!collectRes.ok) {
-        setNotice('Collection failed.');
+      const result = await runBriefRefreshAll();
+      if (!result.ok) {
+        setNotice(result.error || 'Refresh failed.');
         setRefreshPhase('idle');
         return;
       }
-      const collectData = await collectRes.json();
       setRefreshStats({
-        collected: collectData.total_collected || 0,
-        saved: collectData.total_saved || 0,
-        duplicates: collectData.total_duplicates || 0,
+        collected: result.summary?.collected || 0,
+        saved: result.summary?.saved || 0,
+        duplicates: result.summary?.duplicates || 0,
       });
 
       setRefreshPhase('generating');
-      const briefRes = await apiFetch('/topics/brief_all', { method: 'POST' });
-      if (!briefRes.ok) {
-        setNotice('Brief generation failed.');
-        setRefreshPhase('idle');
-        return;
-      }
-      const briefData = await briefRes.json();
       setRefreshPhase('done');
-      setNotice(`Updated ${briefData.total_topics} topics.`);
+      setNotice(`Updated ${result.summary?.totalTopics || 0} topics.`);
 
       if (activeTopic === 'all') {
         await loadAllTopicBriefs();
@@ -529,44 +533,6 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
     }
     return byId;
   }, [visibleAllTopicBriefs, parsedRecentBriefs]);
-  const nextActionCandidate = useMemo(() => {
-    const candidates: NextActionCandidate[] = visibleAllTopicBriefs.map((brief) => {
-      const parsed = parsedAllTopicBriefs.get(brief.id) || parseBriefView(brief.content || '');
-      const clusterCount = parsed.entries.filter((entry) => entry.clusterLabel !== '__synthesis__').length;
-      return {
-        briefId: brief.id,
-        topicId: brief.topic_id,
-        topicName: brief.topic_name || `Topic ${brief.topic_id}`,
-        itemCount: brief.item_count,
-        sourceCount: parsed.sources.length,
-        clusterCount,
-        createdAt: brief.created_at,
-      };
-    });
-    return pickTodayNextAction(candidates);
-  }, [visibleAllTopicBriefs, parsedAllTopicBriefs]);
-  const revisitRecommendations = useMemo(() => {
-    const candidates: RevisitBriefCandidate[] = recentBriefIndex
-      .filter((brief) => activeTopicIdSet.has(brief.topic_id))
-      .map((brief) => {
-        const parsed = parsedRecentBriefs.get(brief.id) || parseBriefView(brief.content || '');
-        return {
-          briefId: brief.id,
-          topicId: brief.topic_id,
-          topicName: brief.topic_name || `Topic ${brief.topic_id}`,
-          date: brief.date,
-          createdAt: brief.created_at,
-          itemCount: brief.item_count,
-          sourceCount: parsed.sources.length,
-          clusterCount: parsed.entries.filter((entry) => entry.clusterLabel !== '__synthesis__').length,
-        };
-      });
-    return buildRevisitRecommendations(candidates);
-  }, [recentBriefIndex, activeTopicIdSet, parsedRecentBriefs]);
-  const onboarding = useMemo(
-    () => buildOnboardingModel(activeTopics, visibleAllTopicBriefs, nextActionCandidate),
-    [activeTopics, visibleAllTopicBriefs, nextActionCandidate],
-  );
   const activeTopicRecord = typeof activeTopic === 'number' ? activeTopics.find((t) => t.id === activeTopic) || null : null;
   const isRefreshing = refreshPhase !== 'idle' && refreshPhase !== 'done';
   const selectedView = selectedBrief ? parseBriefView(selectedBrief.content || '') : null;
@@ -603,6 +569,24 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
       hadFailure: refreshFailed && briefHistory.length === 0,
     });
   }, [selectedBrief, selectedView, clusterEntries.length, refreshFailed, briefHistory.length]);
+
+  useEffect(() => {
+    if (requestedTopicId == null) return;
+    setPendingBriefId(requestedBriefId ?? null);
+    setActiveTopic(requestedTopicId);
+    onRequestedTopicHandled?.();
+  }, [requestedTopicId, requestedBriefId, onRequestedTopicHandled]);
+
+  useEffect(() => {
+    if (refreshToken === 0) return;
+    if (activeTopic === 'all') {
+      loadAllTopicBriefs();
+      return;
+    }
+    if (typeof activeTopic === 'number') {
+      loadBriefHistory(activeTopic, selectedBriefId);
+    }
+  }, [refreshToken]);
 
   const compactSourceName = (source: string): string => {
     const raw = (source || '').trim();
@@ -675,152 +659,6 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
           })}
         </p>
       </div>
-
-      <div className="card onboarding-card">
-        <div className="onboarding-card-head">
-          <div>
-            <h3>First-Value Path</h3>
-            <p className="ui-font">{onboarding.headline}</p>
-          </div>
-          <span className="onboarding-badge ui-font">
-            {onboarding.steps.filter((step) => step.state === 'done').length} / {onboarding.steps.length} complete
-          </span>
-        </div>
-
-        <p className="onboarding-summary">{onboarding.summary}</p>
-
-        <div className="onboarding-steps">
-          {onboarding.steps.map((step) => (
-            <div key={step.key} className={`onboarding-step onboarding-step-${step.state}`}>
-              <div className="onboarding-step-marker" aria-hidden>
-                {step.state === 'done' ? 'OK' : step.state === 'current' ? '>' : '-'}
-              </div>
-              <div>
-                <div className="onboarding-step-title ui-font">{step.title}</div>
-                <div className="onboarding-step-desc">{step.description}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div className="onboarding-next-action">
-          <div>
-            <div className="onboarding-next-label ui-font">Today&apos;s Next Action</div>
-            <h4>{onboarding.nextAction.title}</h4>
-            <p>{onboarding.nextAction.description}</p>
-            {onboarding.nextAction.kind === 'research' && (
-              <div className="onboarding-next-query mono">{onboarding.nextAction.suggestedQuery}</div>
-            )}
-          </div>
-          <div className="onboarding-next-buttons">
-            {onboarding.nextAction.kind === 'settings' && (
-              <button className="paper-primary-btn" onClick={onNavigateSettings}>
-                {onboarding.nextAction.ctaLabel}
-              </button>
-            )}
-            {onboarding.nextAction.kind === 'generate' && (
-              <button
-                className="paper-primary-btn"
-                onClick={refreshAndGenerateAll}
-                disabled={isRefreshing || !allowAdminActions}
-              >
-                {onboarding.nextAction.ctaLabel}
-              </button>
-            )}
-            {onboarding.nextAction.kind === 'research' && (
-              <button
-                className="paper-primary-btn"
-                onClick={() => {
-                  if (onboarding.nextAction.kind !== 'research') return;
-                  onSendToResearch?.(onboarding.nextAction.suggestedQuery);
-                }}
-                disabled={!onSendToResearch}
-              >
-                {onboarding.nextAction.ctaLabel}
-              </button>
-            )}
-            {onboarding.nextAction.kind === 'open-brief' && (
-              <button
-                className="paper-primary-btn"
-                onClick={() => {
-                  if (onboarding.nextAction.kind !== 'open-brief') return;
-                  setActiveTopic(onboarding.nextAction.topicId);
-                }}
-              >
-                {onboarding.nextAction.ctaLabel}
-              </button>
-            )}
-            {(onboarding.nextAction.kind === 'research' || onboarding.nextAction.kind === 'open-brief') && (
-              <button
-                className="ghost"
-                onClick={() => {
-                  if (onboarding.nextAction.kind === 'research' || onboarding.nextAction.kind === 'open-brief') {
-                    setActiveTopic(onboarding.nextAction.topicId);
-                  }
-                }}
-              >
-                Open Topic Brief
-              </button>
-            )}
-            {onboarding.nextAction.kind === 'open-brief' && (
-              <button
-                className="ghost"
-                onClick={refreshAndGenerateAll}
-                disabled={isRefreshing || !allowAdminActions}
-              >
-                Refresh Briefs
-              </button>
-            )}
-            <button className="ghost" onClick={onNavigateArchive}>
-              Open Archive
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {revisitRecommendations.length > 0 && (
-        <div className="card revisit-card">
-          <div className="revisit-card-head">
-            <div>
-              <h3>Revisit Queue</h3>
-              <p className="ui-font">Use strong prior briefs as comparison baselines before you overreact to the latest cycle.</p>
-            </div>
-            <span className="onboarding-badge ui-font">{revisitRecommendations.length} recommendations</span>
-          </div>
-
-          <div className="revisit-list">
-            {revisitRecommendations.map((item) => (
-              <article key={item.briefId} className="revisit-item">
-                <div className="revisit-item-head">
-                  <div>
-                    <div className="revisit-item-topic ui-font">{item.topicName}</div>
-                    <h4>{item.date}</h4>
-                  </div>
-                  <span className="health-state-badge health-state-neutral">Revisit</span>
-                </div>
-                <p className="revisit-item-reason">{item.reason}</p>
-                <div className="revisit-item-meta ui-font">
-                  Prior brief: {item.sourceCount} sources | {item.itemCount} items | {item.clusterCount} clusters
-                </div>
-                <div className="revisit-item-actions">
-                  <button
-                    className="paper-primary-btn"
-                    onClick={() => {
-                      setPendingBriefId(item.briefId);
-                      setActiveTopic(item.topicId);
-                    }}
-                  >
-                    Open Topic Brief
-                  </button>
-                  <button className="ghost" onClick={onNavigateArchive}>
-                    Open Archive
-                  </button>
-                </div>
-              </article>
-            ))}
-          </div>
-        </div>
-      )}
 
       <div className="topic-cards-row brief-topic-row">
         <button key="all-topics" className={`topic-chip ${activeTopic === 'all' ? 'active' : ''}`} onClick={() => setActiveTopic('all')}>

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -39,7 +39,7 @@ describe('NewsFeedPanel revisit recommendations', () => {
     mockedApiFetch.mockReset();
   });
 
-  it('surfaces a revisit queue and routes archive/topic actions', async () => {
+  it('keeps revisit guidance out of the main brief surface while preserving topic navigation', async () => {
     mockedApiFetch.mockImplementation(async (path: string) => {
       if (path === '/briefs/recent?limit=200') {
         return new Response(
@@ -113,17 +113,11 @@ describe('NewsFeedPanel revisit recommendations', () => {
       />,
     );
 
-    expect(await screen.findByText(/Revisit Queue/i)).toBeInTheDocument();
-    expect(screen.getByText(/stronger evidence than the latest cycle/i)).toBeInTheDocument();
+    expect(await screen.findByText(/All Topics Digest/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Revisit Queue/i)).not.toBeInTheDocument();
 
-    const revisitCard = screen.getByText(/Revisit Queue/i).closest('.revisit-card');
-    expect(revisitCard).not.toBeNull();
-    const revisitScope = within(revisitCard as HTMLElement);
-
-    fireEvent.click(revisitScope.getByRole('button', { name: /Open Archive/i }));
-    expect(onNavigateArchive).toHaveBeenCalled();
-
-    fireEvent.click(revisitScope.getByRole('button', { name: /Open Topic Brief/i }));
+    fireEvent.click(screen.getAllByRole('button', { name: /Open Topic Brief/i })[0]);
     expect(await screen.findByText(/Synthesis Brief/i)).toBeInTheDocument();
+    expect(onNavigateArchive).not.toHaveBeenCalled();
   });
 });

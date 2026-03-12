@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -45,7 +45,7 @@ describe('NewsFeedPanel next action', () => {
     mockedApiFetch.mockReset();
   });
 
-  it('renders evidence-based next action and routes to research/topic brief', async () => {
+  it('keeps the daily brief surface free of onboarding and recommendation cards', async () => {
     mockedApiFetch.mockImplementation(async (path: string) => {
       if (path === '/briefs/recent?limit=200') {
         return new Response(
@@ -89,7 +89,6 @@ describe('NewsFeedPanel next action', () => {
       return new Response(JSON.stringify({ items: [] }), { status: 200 });
     });
 
-    const onSendToResearch = vi.fn();
     render(
       <NewsFeedPanel
         topics={[
@@ -106,23 +105,14 @@ describe('NewsFeedPanel next action', () => {
         ]}
         onNavigateSettings={() => {}}
         onNavigateArchive={() => {}}
-        onSendToResearch={onSendToResearch}
+        onSendToResearch={() => {}}
       />,
     );
 
-    expect(await screen.findByText("Today's Next Action", { exact: false })).toBeInTheDocument();
-    expect(screen.getByText(/broadest source coverage today/i)).toBeInTheDocument();
+    expect(await screen.findByText(/All Topics Digest/i)).toBeInTheDocument();
+    expect(screen.queryByText(/First-Value Path/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Today's Next Action/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Revisit Queue/i)).not.toBeInTheDocument();
     expect(screen.getAllByText('Healthy').length).toBeGreaterThan(0);
-
-    fireEvent.click(screen.getByRole('button', { name: /Send to Research/i }));
-    expect(onSendToResearch).toHaveBeenCalledWith(
-      'What are the most actionable implications from the latest AI Daily brief?',
-    );
-
-    fireEvent.click(screen.getAllByRole('button', { name: /Open Topic Brief/i })[0]);
-
-    await waitFor(() => {
-      expect(mockedApiFetch).toHaveBeenCalledWith('/briefs/1/history?limit=30&since_hours=168');
-    });
   });
 });

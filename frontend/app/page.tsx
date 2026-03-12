@@ -6,6 +6,7 @@ import NewsFeedPanel from './components/NewsFeedPanel';
 import ResearchPanel from './components/ResearchPanel';
 import SettingsPanel from './components/SettingsPanel';
 import ArchivesPanel from './components/ArchivesPanel';
+import GuideOverlay from './components/GuideOverlay';
 
 type PanelKey = 'news' | 'research' | 'settings' | 'archives';
 type ThemeMode = 'warm' | 'cool';
@@ -17,6 +18,10 @@ export default function Page() {
   const [topics, setTopics] = useState<Topic[]>([]);
   const [researchRunning, setResearchRunning] = useState(false);
   const [pendingResearchQuery, setPendingResearchQuery] = useState<string | undefined>();
+  const [guideDeepActionStarted, setGuideDeepActionStarted] = useState(false);
+  const [requestedNewsTopicId, setRequestedNewsTopicId] = useState<number | null>(null);
+  const [requestedNewsBriefId, setRequestedNewsBriefId] = useState<number | null>(null);
+  const [briefRefreshToken, setBriefRefreshToken] = useState(0);
   const [theme, setTheme] = useState<ThemeMode>('warm');
 
   const loadTopics = async () => {
@@ -32,11 +37,33 @@ export default function Page() {
 
   const handleSendToResearch = useCallback((query: string) => {
     setPendingResearchQuery(query);
+    setGuideDeepActionStarted(true);
     setPanel('research');
   }, []);
 
   const handlePendingQueryConsumed = useCallback(() => {
     setPendingResearchQuery(undefined);
+  }, []);
+
+  const handleResearchRunningChange = useCallback((running: boolean) => {
+    setResearchRunning(running);
+    if (running) setGuideDeepActionStarted(true);
+  }, []);
+
+  const handleOpenTopicBrief = useCallback((topicId: number, briefId?: number | null) => {
+    setRequestedNewsTopicId(topicId);
+    setRequestedNewsBriefId(briefId ?? null);
+    setPanel('news');
+  }, []);
+
+  const handleRequestedTopicHandled = useCallback(() => {
+    setRequestedNewsTopicId(null);
+    setRequestedNewsBriefId(null);
+  }, []);
+
+  const handleGuideRefreshCompleted = useCallback(() => {
+    setBriefRefreshToken((prev) => prev + 1);
+    setPanel('news');
   }, []);
 
   useEffect(() => {
@@ -179,11 +206,15 @@ export default function Page() {
               onNavigateSettings={() => setPanel('settings')}
               onNavigateArchive={() => setPanel('archives')}
               onSendToResearch={handleSendToResearch}
+              requestedTopicId={requestedNewsTopicId}
+              requestedBriefId={requestedNewsBriefId}
+              onRequestedTopicHandled={handleRequestedTopicHandled}
+              refreshToken={briefRefreshToken}
             />
           </div>
           <div style={{ display: panel === 'research' ? 'block' : 'none' }}>
             <ResearchPanel
-              onRunningChange={setResearchRunning}
+              onRunningChange={handleResearchRunningChange}
               pendingQuery={pendingResearchQuery}
               onPendingQueryConsumed={handlePendingQueryConsumed}
               isVisible={panel === 'research'}
@@ -216,6 +247,17 @@ export default function Page() {
           )}
         </svg>
       </button>
+
+      <GuideOverlay
+        topics={topics}
+        deepActionStarted={guideDeepActionStarted}
+        onNavigateDailyBrief={() => setPanel('news')}
+        onNavigateSettings={() => setPanel('settings')}
+        onNavigateArchive={() => setPanel('archives')}
+        onSendToResearch={handleSendToResearch}
+        onOpenTopicBrief={handleOpenTopicBrief}
+        onRefreshCompleted={handleGuideRefreshCompleted}
+      />
     </div>
   );
 }
