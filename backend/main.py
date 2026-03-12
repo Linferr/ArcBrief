@@ -302,6 +302,90 @@ def _sync_default_topic_sources(db: ArcBriefDB, defaults: List[Dict]) -> None:
             db.create_topic(preset)
 
 
+def _default_topic_preset_map() -> Dict[str, Dict[str, Any]]:
+    return {preset["name"]: preset for preset in _default_topic_presets()}
+
+
+def _starter_pack_definitions() -> List[Dict[str, Any]]:
+    presets = _default_topic_preset_map()
+
+    def topic_preview(name: str) -> Dict[str, Any]:
+        preset = presets[name]
+        return {
+            "name": name,
+            "rss_count": len(preset.get("rss_sources", [])),
+            "keyword_groups": len(preset.get("keywords", [])),
+        }
+
+    return [
+        {
+            "id": "ai-founder-daily",
+            "name": "AI Founder Daily",
+            "ideal_for": "AI founder / operator",
+            "focus": "Models, builders, policy shifts that affect product decisions.",
+            "content_types": ["daily digest", "model release", "policy signal"],
+            "signal_density": "High",
+            "recommended_language": "English (US)",
+            "topic_names": ["AI Daily", "AI Builder Signals", "AI Policy & Safety"],
+            "topics": [
+                topic_preview("AI Daily"),
+                topic_preview("AI Builder Signals"),
+                topic_preview("AI Policy & Safety"),
+            ],
+        },
+        {
+            "id": "ai-builder-watch",
+            "name": "AI Builder Watch",
+            "ideal_for": "Indie builders and devtools teams",
+            "focus": "Tooling, coding agents, MCP, workflow changes, developer signals.",
+            "content_types": ["builder brief", "workflow update", "tool launch"],
+            "signal_density": "High",
+            "recommended_language": "English (US)",
+            "topic_names": ["AI Daily", "AI Builder Signals"],
+            "topics": [
+                topic_preview("AI Daily"),
+                topic_preview("AI Builder Signals"),
+            ],
+        },
+        {
+            "id": "ai-policy-watch",
+            "name": "AI Policy Watch",
+            "ideal_for": "AI PMs, policy-sensitive teams, governance leads",
+            "focus": "Regulation, safety frameworks, compliance and global policy context.",
+            "content_types": ["policy digest", "regulation change", "safety signal"],
+            "signal_density": "Medium",
+            "recommended_language": "English (US)",
+            "topic_names": ["AI Policy & Safety", "Global Trending"],
+            "topics": [
+                topic_preview("AI Policy & Safety"),
+                topic_preview("Global Trending"),
+            ],
+        },
+        {
+            "id": "global-risk-watch",
+            "name": "Global Risk Watch",
+            "ideal_for": "Operators tracking macro and geopolitical spillover",
+            "focus": "Global developments that may change AI, policy, or operating conditions.",
+            "content_types": ["risk digest", "geopolitical shift", "market-moving signal"],
+            "signal_density": "Medium",
+            "recommended_language": "English (US)",
+            "topic_names": ["Global Trending", "AI Policy & Safety"],
+            "topics": [
+                topic_preview("Global Trending"),
+                topic_preview("AI Policy & Safety"),
+            ],
+        },
+    ]
+
+
+def _get_starter_pack(pack_id: str) -> Optional[Dict[str, Any]]:
+    wanted = pack_id.strip().lower()
+    for pack in _starter_pack_definitions():
+        if pack["id"].lower() == wanted:
+            return pack
+    return None
+
+
 _LEGACY_PRESET_MARKERS: Dict[str, Dict[str, List[str]]] = {
     "Global Trending": {
         "rss": [
@@ -611,6 +695,27 @@ class RefreshRequest(BaseModel):
     topic_id: Optional[int] = Field(default=None, gt=0)
     language: Optional[str] = Field(default=None, max_length=64)
     push: bool = True
+
+
+class StarterPackPreviewTopic(BaseModel):
+    name: str
+    rss_count: int
+    keyword_groups: int
+
+
+class StarterPackResponse(BaseModel):
+    id: str
+    name: str
+    ideal_for: str
+    focus: str
+    content_types: List[str]
+    signal_density: str
+    recommended_language: str
+    topics: List[StarterPackPreviewTopic]
+
+
+class StarterPackApplyRequest(BaseModel):
+    pack_id: str = Field(..., min_length=1, max_length=128)
 
 
 def _sanitize_query(query: str) -> str:
@@ -1401,6 +1506,46 @@ def create_topic(payload: TopicCreateRequest):
     if SCHEDULER:
         SCHEDULER.refresh_jobs()
     return TopicResponse(**topic.__dict__)
+
+
+@app.get("/api/starter-packs", response_model=List[StarterPackResponse])
+def list_starter_packs():
+    return [StarterPackResponse(**pack) for pack in _starter_pack_definitions()]
+
+
+@app.post("/api/starter-packs/apply")
+def apply_starter_pack(payload: StarterPackApplyRequest):
+    if DB is None:
+        raise HTTPException(status_code=500, detail="DB not initialized")
+
+    pack = _get_starter_pack(payload.pack_id)
+    if not pack:
+        raise HTTPException(status_code=404, detail="Starter pack not found")
+
+    existing_topics = {topic.name: topic for topic in DB.list_topics()}
+    preset_map = _default_topic_preset_map()
+    created_topics: List[str] = []
+    skipped_topics: List[str] = []
+
+    for topic_name in pack["topic_names"]:
+        if topic_name in existing_topics:
+            skipped_topics.append(topic_name)
+            continue
+        preset = preset_map.get(topic_name)
+        if not preset:
+            continue
+        DB.create_topic(preset)
+        created_topics.append(topic_name)
+
+    if SCHEDULER:
+        SCHEDULER.refresh_jobs()
+
+    return {
+        "pack_id": pack["id"],
+        "created_count": len(created_topics),
+        "created_topics": created_topics,
+        "existing_topics": skipped_topics,
+    }
 
 
 @app.get("/api/topics", response_model=List[TopicResponse])

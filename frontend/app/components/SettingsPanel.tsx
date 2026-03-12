@@ -1,7 +1,7 @@
 ﻿'use client';
 
 import { useEffect, useState } from 'react';
-import { apiFetch, Topic, SystemStatus, RssHealthEntry, AppConfig, getTopicColor, toCsv } from './api';
+import { apiFetch, Topic, SystemStatus, RssHealthEntry, AppConfig, StarterPack, getTopicColor, toCsv } from './api';
 
 interface Props {
   topics: Topic[];
@@ -102,6 +102,8 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
   const [rssHealth, setRssHealth] = useState<RssHealthEntry[]>([]);
   const [healthExpanded, setHealthExpanded] = useState(false);
   const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
+  const [starterPacks, setStarterPacks] = useState<StarterPack[]>([]);
+  const [applyingPackId, setApplyingPackId] = useState<string | null>(null);
   const [configSaving, setConfigSaving] = useState(false);
   const [runStats, setRunStats] = useState<RunStat[]>([]);
   const [runStatsTopicId, setRunStatsTopicId] = useState<number | null>(null);
@@ -118,6 +120,7 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
 
   useEffect(() => {
     refreshSystemStatus();
+    apiFetch('/starter-packs').then(r => r.ok ? r.json() : []).then(d => setStarterPacks(Array.isArray(d) ? d : [])).catch(() => setStarterPacks([]));
     if (allowAdminActions) {
       apiFetch('/rss-health').then(r => r.ok ? r.json() : null).then(d => d && setRssHealth(d.sources || [])).catch(() => {});
       apiFetch('/config').then(r => r.ok ? r.json() : null).then(d => d && setAppConfig(d)).catch(() => {});
@@ -178,6 +181,35 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
       setTopicRss(['']);
       setTopicIsActive(true);
     } catch { setNotice('Topic creation failed.'); }
+  };
+
+  const applyStarterPack = async (packId: string) => {
+    if (!allowAdminActions) {
+      setNotice('Admin actions are disabled in public demo mode.');
+      return;
+    }
+    setApplyingPackId(packId);
+    setNotice('');
+    try {
+      const res = await apiFetch('/starter-packs/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pack_id: packId }),
+      });
+      if (!res.ok) {
+        setNotice('Starter pack apply failed.');
+        setApplyingPackId(null);
+        return;
+      }
+      const data = await res.json();
+      const createdCount = Number(data?.created_count || 0);
+      const existingCount = Array.isArray(data?.existing_topics) ? data.existing_topics.length : 0;
+      setNotice(`Starter pack applied. Created ${createdCount} topics, skipped ${existingCount} existing topics.`);
+      onTopicsChange();
+    } catch {
+      setNotice('Starter pack apply failed.');
+    }
+    setApplyingPackId(null);
   };
 
   const deleteTopic = async (topicId: number) => {
@@ -434,6 +466,45 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
           {/* 鈹€鈹€ Right: Topic Intake 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ */}
           <div className="card settings-scope-intake">
             <h3>Topic Intake</h3>
+            {starterPacks.length > 0 && (
+              <div style={{ marginBottom: '14px' }}>
+                <div className="muted" style={{ marginBottom: '8px' }}>
+                  Starter Packs
+                </div>
+                <div style={{ display: 'grid', gap: '10px' }}>
+                  {starterPacks.map((pack) => (
+                    <div key={pack.id} style={{ border: '1px solid var(--border-color)', borderRadius: '10px', padding: '10px', background: 'var(--bg-main)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'flex-start' }}>
+                        <div>
+                          <div style={{ fontWeight: 600 }}>{pack.name}</div>
+                          <div className="muted" style={{ marginTop: '2px' }}>{pack.ideal_for}</div>
+                        </div>
+                        <span className="settings-badge status-on">{pack.signal_density}</span>
+                      </div>
+                      <div className="muted" style={{ marginTop: '8px' }}>{pack.focus}</div>
+                      <div className="muted" style={{ marginTop: '6px', fontSize: '0.82rem' }}>
+                        Expected: {pack.content_types.join(' · ')} | Recommended language: {pack.recommended_language}
+                      </div>
+                      <div style={{ marginTop: '8px', display: 'grid', gap: '4px', fontSize: '0.82rem' }}>
+                        {pack.topics.map((topic) => (
+                          <div key={topic.name}>{topic.name} · {topic.rss_count} RSS · {topic.keyword_groups} keyword groups</div>
+                        ))}
+                      </div>
+                      {allowAdminActions && (
+                        <button
+                          className="paper-primary-btn"
+                          style={{ marginTop: '10px' }}
+                          onClick={() => applyStarterPack(pack.id)}
+                          disabled={applyingPackId === pack.id}
+                        >
+                          {applyingPackId === pack.id ? 'Applying...' : 'Apply Pack'}
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             {!allowAdminActions ? (
               <div className="muted">Topic intake is disabled in public demo mode.</div>
             ) : (

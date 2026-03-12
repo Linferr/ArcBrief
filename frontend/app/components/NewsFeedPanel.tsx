@@ -3,6 +3,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { apiFetch, downloadPdfResponse, markdownToPlainText, Topic, Brief, RecentBrief, Article } from './api';
 import MarkdownViewer from './MarkdownViewer';
+import { buildOnboardingModel, pickTodayNextAction, type NextActionCandidate } from './onboarding';
+import { computeDigestHealth, computeTopicHealth, healthStateClassName } from './healthState';
+import { buildRevisitRecommendations, type RevisitBriefCandidate } from './revisit';
 
 interface Props {
   topics: Topic[];
@@ -258,11 +261,11 @@ export const parseBriefView = (content: string): ParsedBriefView => {
   };
 };
 
-export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateArchive }: Props) {
+export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateArchive, onSendToResearch }: Props) {
   const allowAdminActions = process.env.NEXT_PUBLIC_ARCBRIEF_ENABLE_ADMIN_ACTIONS !== '0';
   const [activeTopic, setActiveTopic] = useState<ActiveTopicKey>('all');
   const [briefHistory, setBriefHistory] = useState<Brief[]>([]);
-  const [allTopicBriefs, setAllTopicBriefs] = useState<RecentBrief[]>([]);
+  const [recentBriefIndex, setRecentBriefIndex] = useState<RecentBrief[]>([]);
   const [topicArticles, setTopicArticles] = useState<Article[]>([]);
   const [articlesLoading, setArticlesLoading] = useState(false);
   const [selectedBriefId, setSelectedBriefId] = useState<number | null>(null);
@@ -285,7 +288,7 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
 
   const loadBriefHistory = async (topicId: number, preferredBriefId: number | null = null) => {
     try {
-      const res = await apiFetch(`/briefs/${topicId}/history?limit=30&since_hours=48`);
+      const res = await apiFetch(`/briefs/${topicId}/history?limit=30&since_hours=168`);
       if (res.ok) {
         const data = (await res.json()) as Brief[];
         setBriefHistory(data);
@@ -309,20 +312,13 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
     try {
       const res = await apiFetch('/briefs/recent?limit=200');
       if (!res.ok) {
-        setAllTopicBriefs([]);
+        setRecentBriefIndex([]);
         return;
       }
       const data = (await res.json()) as { items: RecentBrief[] };
-      const latestByTopic = new Map<number, RecentBrief>();
-      for (const item of data.items || []) {
-        if (!latestByTopic.has(item.topic_id)) latestByTopic.set(item.topic_id, item);
-      }
-      const merged = Array.from(latestByTopic.values()).sort((a, b) =>
-        (a.topic_name || '').localeCompare(b.topic_name || '')
-      );
-      setAllTopicBriefs(merged);
+      setRecentBriefIndex(data.items || []);
     } catch {
-      setAllTopicBriefs([]);
+      setRecentBriefIndex([]);
     }
   };
 
@@ -505,9 +501,71 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
     }
   };
 
+  const allTopicBriefs = useMemo(() => {
+    const latestByTopic = new Map<number, RecentBrief>();
+    for (const item of recentBriefIndex) {
+      if (!activeTopicIdSet.has(item.topic_id)) continue;
+      if (!latestByTopic.has(item.topic_id)) latestByTopic.set(item.topic_id, item);
+    }
+    return Array.from(latestByTopic.values()).sort((a, b) =>
+      (a.topic_name || '').localeCompare(b.topic_name || ''),
+    );
+  }, [recentBriefIndex, activeTopicIdSet]);
   const visibleAllTopicBriefs = useMemo(
     () => allTopicBriefs.filter((brief) => activeTopicIdSet.has(brief.topic_id)),
     [allTopicBriefs, activeTopicIdSet],
+  );
+  const parsedRecentBriefs = useMemo(() => {
+    const byId = new Map<number, ParsedBriefView>();
+    for (const brief of recentBriefIndex) {
+      byId.set(brief.id, parseBriefView(brief.content || ''));
+    }
+    return byId;
+  }, [recentBriefIndex]);
+  const parsedAllTopicBriefs = useMemo(() => {
+    const byId = new Map<number, ParsedBriefView>();
+    for (const brief of visibleAllTopicBriefs) {
+      byId.set(brief.id, parsedRecentBriefs.get(brief.id) || parseBriefView(brief.content || ''));
+    }
+    return byId;
+  }, [visibleAllTopicBriefs, parsedRecentBriefs]);
+  const nextActionCandidate = useMemo(() => {
+    const candidates: NextActionCandidate[] = visibleAllTopicBriefs.map((brief) => {
+      const parsed = parsedAllTopicBriefs.get(brief.id) || parseBriefView(brief.content || '');
+      const clusterCount = parsed.entries.filter((entry) => entry.clusterLabel !== '__synthesis__').length;
+      return {
+        briefId: brief.id,
+        topicId: brief.topic_id,
+        topicName: brief.topic_name || `Topic ${brief.topic_id}`,
+        itemCount: brief.item_count,
+        sourceCount: parsed.sources.length,
+        clusterCount,
+        createdAt: brief.created_at,
+      };
+    });
+    return pickTodayNextAction(candidates);
+  }, [visibleAllTopicBriefs, parsedAllTopicBriefs]);
+  const revisitRecommendations = useMemo(() => {
+    const candidates: RevisitBriefCandidate[] = recentBriefIndex
+      .filter((brief) => activeTopicIdSet.has(brief.topic_id))
+      .map((brief) => {
+        const parsed = parsedRecentBriefs.get(brief.id) || parseBriefView(brief.content || '');
+        return {
+          briefId: brief.id,
+          topicId: brief.topic_id,
+          topicName: brief.topic_name || `Topic ${brief.topic_id}`,
+          date: brief.date,
+          createdAt: brief.created_at,
+          itemCount: brief.item_count,
+          sourceCount: parsed.sources.length,
+          clusterCount: parsed.entries.filter((entry) => entry.clusterLabel !== '__synthesis__').length,
+        };
+      });
+    return buildRevisitRecommendations(candidates);
+  }, [recentBriefIndex, activeTopicIdSet, parsedRecentBriefs]);
+  const onboarding = useMemo(
+    () => buildOnboardingModel(activeTopics, visibleAllTopicBriefs, nextActionCandidate),
+    [activeTopics, visibleAllTopicBriefs, nextActionCandidate],
   );
   const activeTopicRecord = typeof activeTopic === 'number' ? activeTopics.find((t) => t.id === activeTopic) || null : null;
   const isRefreshing = refreshPhase !== 'idle' && refreshPhase !== 'done';
@@ -517,6 +575,34 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
     () => (selectedView?.entries || []).filter((e) => e.clusterLabel !== '__synthesis__'),
     [selectedView],
   );
+  const refreshFailed = notice.toLowerCase().includes('failed');
+  const missingDigestTopics = useMemo(
+    () => activeTopics.filter((topic) => !visibleAllTopicBriefs.some((brief) => brief.topic_id === topic.id)),
+    [activeTopics, visibleAllTopicBriefs],
+  );
+  const digestHealth = useMemo(() => {
+    const totalSourceCount = visibleAllTopicBriefs.reduce((sum, brief) => {
+      const parsed = parsedAllTopicBriefs.get(brief.id);
+      return sum + (parsed?.sources.length || 0);
+    }, 0);
+    const totalItemCount = visibleAllTopicBriefs.reduce((sum, brief) => sum + brief.item_count, 0);
+    return computeDigestHealth({
+      activeTopicCount: activeTopics.length,
+      coveredTopicCount: visibleAllTopicBriefs.length,
+      totalSourceCount,
+      totalItemCount,
+      hadFailure: refreshFailed && visibleAllTopicBriefs.length === 0,
+    });
+  }, [activeTopics.length, visibleAllTopicBriefs, parsedAllTopicBriefs, refreshFailed]);
+  const selectedTopicHealth = useMemo(() => {
+    if (!selectedBrief || !selectedView) return null;
+    return computeTopicHealth({
+      sourceCount: selectedView.sources.length,
+      itemCount: selectedBrief.item_count,
+      clusterCount: clusterEntries.length,
+      hadFailure: refreshFailed && briefHistory.length === 0,
+    });
+  }, [selectedBrief, selectedView, clusterEntries.length, refreshFailed, briefHistory.length]);
 
   const compactSourceName = (source: string): string => {
     const raw = (source || '').trim();
@@ -590,6 +676,152 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
         </p>
       </div>
 
+      <div className="card onboarding-card">
+        <div className="onboarding-card-head">
+          <div>
+            <h3>First-Value Path</h3>
+            <p className="ui-font">{onboarding.headline}</p>
+          </div>
+          <span className="onboarding-badge ui-font">
+            {onboarding.steps.filter((step) => step.state === 'done').length} / {onboarding.steps.length} complete
+          </span>
+        </div>
+
+        <p className="onboarding-summary">{onboarding.summary}</p>
+
+        <div className="onboarding-steps">
+          {onboarding.steps.map((step) => (
+            <div key={step.key} className={`onboarding-step onboarding-step-${step.state}`}>
+              <div className="onboarding-step-marker" aria-hidden>
+                {step.state === 'done' ? 'OK' : step.state === 'current' ? '>' : '-'}
+              </div>
+              <div>
+                <div className="onboarding-step-title ui-font">{step.title}</div>
+                <div className="onboarding-step-desc">{step.description}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="onboarding-next-action">
+          <div>
+            <div className="onboarding-next-label ui-font">Today&apos;s Next Action</div>
+            <h4>{onboarding.nextAction.title}</h4>
+            <p>{onboarding.nextAction.description}</p>
+            {onboarding.nextAction.kind === 'research' && (
+              <div className="onboarding-next-query mono">{onboarding.nextAction.suggestedQuery}</div>
+            )}
+          </div>
+          <div className="onboarding-next-buttons">
+            {onboarding.nextAction.kind === 'settings' && (
+              <button className="paper-primary-btn" onClick={onNavigateSettings}>
+                {onboarding.nextAction.ctaLabel}
+              </button>
+            )}
+            {onboarding.nextAction.kind === 'generate' && (
+              <button
+                className="paper-primary-btn"
+                onClick={refreshAndGenerateAll}
+                disabled={isRefreshing || !allowAdminActions}
+              >
+                {onboarding.nextAction.ctaLabel}
+              </button>
+            )}
+            {onboarding.nextAction.kind === 'research' && (
+              <button
+                className="paper-primary-btn"
+                onClick={() => {
+                  if (onboarding.nextAction.kind !== 'research') return;
+                  onSendToResearch?.(onboarding.nextAction.suggestedQuery);
+                }}
+                disabled={!onSendToResearch}
+              >
+                {onboarding.nextAction.ctaLabel}
+              </button>
+            )}
+            {onboarding.nextAction.kind === 'open-brief' && (
+              <button
+                className="paper-primary-btn"
+                onClick={() => {
+                  if (onboarding.nextAction.kind !== 'open-brief') return;
+                  setActiveTopic(onboarding.nextAction.topicId);
+                }}
+              >
+                {onboarding.nextAction.ctaLabel}
+              </button>
+            )}
+            {(onboarding.nextAction.kind === 'research' || onboarding.nextAction.kind === 'open-brief') && (
+              <button
+                className="ghost"
+                onClick={() => {
+                  if (onboarding.nextAction.kind === 'research' || onboarding.nextAction.kind === 'open-brief') {
+                    setActiveTopic(onboarding.nextAction.topicId);
+                  }
+                }}
+              >
+                Open Topic Brief
+              </button>
+            )}
+            {onboarding.nextAction.kind === 'open-brief' && (
+              <button
+                className="ghost"
+                onClick={refreshAndGenerateAll}
+                disabled={isRefreshing || !allowAdminActions}
+              >
+                Refresh Briefs
+              </button>
+            )}
+            <button className="ghost" onClick={onNavigateArchive}>
+              Open Archive
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {revisitRecommendations.length > 0 && (
+        <div className="card revisit-card">
+          <div className="revisit-card-head">
+            <div>
+              <h3>Revisit Queue</h3>
+              <p className="ui-font">Use strong prior briefs as comparison baselines before you overreact to the latest cycle.</p>
+            </div>
+            <span className="onboarding-badge ui-font">{revisitRecommendations.length} recommendations</span>
+          </div>
+
+          <div className="revisit-list">
+            {revisitRecommendations.map((item) => (
+              <article key={item.briefId} className="revisit-item">
+                <div className="revisit-item-head">
+                  <div>
+                    <div className="revisit-item-topic ui-font">{item.topicName}</div>
+                    <h4>{item.date}</h4>
+                  </div>
+                  <span className="health-state-badge health-state-neutral">Revisit</span>
+                </div>
+                <p className="revisit-item-reason">{item.reason}</p>
+                <div className="revisit-item-meta ui-font">
+                  Prior brief: {item.sourceCount} sources | {item.itemCount} items | {item.clusterCount} clusters
+                </div>
+                <div className="revisit-item-actions">
+                  <button
+                    className="paper-primary-btn"
+                    onClick={() => {
+                      setPendingBriefId(item.briefId);
+                      setActiveTopic(item.topicId);
+                    }}
+                  >
+                    Open Topic Brief
+                  </button>
+                  <button className="ghost" onClick={onNavigateArchive}>
+                    Open Archive
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="topic-cards-row brief-topic-row">
         <button key="all-topics" className={`topic-chip ${activeTopic === 'all' ? 'active' : ''}`} onClick={() => setActiveTopic('all')}>
           <span className="topic-chip-name">All Topics</span>
@@ -640,23 +872,51 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
               <h3 style={{ fontFamily: 'var(--font-serif)' }}>All Topics Digest</h3>
               <span className="brief-subtitle">Latest brief from each topic</span>
             </div>
+            {activeTopics.length > 0 && (
+              <span className={`health-state-badge ${healthStateClassName(digestHealth.kind)}`}>
+                {digestHealth.label}
+              </span>
+            )}
           </div>
+          {activeTopics.length > 0 && (
+            <div className="health-state-reason ui-font">
+              {digestHealth.reason}
+              {missingDigestTopics.length > 0 && (
+                <span className="health-state-extra"> Missing topics: {missingDigestTopics.map((topic) => topic.name).join(', ')}.</span>
+              )}
+            </div>
+          )}
 
           {visibleAllTopicBriefs.length === 0 && (
-            <div className="muted">No topic briefs generated yet. Click Refresh Brief to generate one for each topic.</div>
+            <div className="muted">
+              {refreshFailed
+                ? 'Brief generation failed in the latest cycle. Click Refresh Brief to try again.'
+                : 'No topic briefs generated yet. Click Refresh Brief to generate one for each topic.'}
+            </div>
           )}
 
           <div className="all-topics-stack">
             {visibleAllTopicBriefs.map((brief) => {
               const topic = activeTopics.find((t) => t.id === brief.topic_id);
-              const parsed = parseBriefView(brief.content || '');
+              const parsed = parsedAllTopicBriefs.get(brief.id) || parseBriefView(brief.content || '');
               const topicSynthesis = parsed.entries.find((e) => e.clusterLabel === '__synthesis__') || null;
+              const topicHealth = computeTopicHealth({
+                sourceCount: parsed.sources.length,
+                itemCount: brief.item_count,
+                clusterCount: parsed.entries.filter((e) => e.clusterLabel !== '__synthesis__').length,
+              });
               return (
                 <article key={brief.id} className="all-topic-section">
                   <div className="all-topic-head">
-                    <h4 style={{ fontFamily: 'var(--font-serif)' }}>{brief.topic_name || topic?.name || `Topic ${brief.topic_id}`}</h4>
-                    <span className="source-meta">{formatBriefTimestamp(brief)}</span>
+                    <div>
+                      <h4 style={{ fontFamily: 'var(--font-serif)' }}>{brief.topic_name || topic?.name || `Topic ${brief.topic_id}`}</h4>
+                      <div className="health-state-row">
+                        <span className={`health-state-badge ${healthStateClassName(topicHealth.kind)}`}>{topicHealth.label}</span>
+                        <span className="source-meta">{formatBriefTimestamp(brief)}</span>
+                      </div>
+                    </div>
                   </div>
+                  <div className="health-state-reason ui-font">{topicHealth.reason}</div>
 
                   {topicSynthesis ? (
                     <div className="brief-render-stack">
@@ -768,7 +1028,15 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
                       <h3 style={{ fontFamily: 'var(--font-serif)' }}>Synthesis Brief</h3>
                       {selectedBrief && <span className="brief-subtitle">{selectedBrief.date}</span>}
                     </div>
+                    {selectedTopicHealth && (
+                      <span className={`health-state-badge ${healthStateClassName(selectedTopicHealth.kind)}`}>
+                        {selectedTopicHealth.label}
+                      </span>
+                    )}
                   </div>
+                  {selectedTopicHealth && (
+                    <div className="health-state-reason ui-font">{selectedTopicHealth.reason}</div>
+                  )}
 
                   {selectedBrief && (
                     <>
@@ -947,7 +1215,7 @@ export default function NewsFeedPanel({ topics, onNavigateSettings, onNavigateAr
           </div>
 
           <aside className="brief-sidebar">
-            <h4 className="ui-font">Recent Briefs (48h)</h4>
+            <h4 className="ui-font">Recent Briefs (7d)</h4>
             <div className="source-list brief-history-list">
               {briefHistory.map((brief) => {
                 const preview = extractBriefPreview(brief);

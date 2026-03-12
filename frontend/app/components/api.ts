@@ -182,6 +182,23 @@ export type AppConfig = {
   entity_watchlist: string;
 };
 
+export type StarterPackPreviewTopic = {
+  name: string;
+  rss_count: number;
+  keyword_groups: number;
+};
+
+export type StarterPack = {
+  id: string;
+  name: string;
+  ideal_for: string;
+  focus: string;
+  content_types: string[];
+  signal_density: string;
+  recommended_language: string;
+  topics: StarterPackPreviewTopic[];
+};
+
 export const PIPELINE_STAGES = [
   { key: 'outline', label: 'Outline' },
   { key: 'search_provider', label: 'Search Provider' },
