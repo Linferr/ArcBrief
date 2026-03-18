@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import { buildRevisitRecommendations, type RevisitBriefCandidate } from '../app/components/revisit';
 
+const frozenNow = new Date('2026-03-12T12:00:00Z');
+
 const candidate = (overrides: Partial<RevisitBriefCandidate> = {}): RevisitBriefCandidate => ({
   briefId: 1,
   topicId: 1,
@@ -38,7 +40,7 @@ describe('buildRevisitRecommendations', () => {
         sourceCount: 9,
         clusterCount: 4,
       }),
-    ]);
+    ], frozenNow);
 
     expect(recs).toHaveLength(1);
     expect(recs[0].briefId).toBe(10);
@@ -57,7 +59,7 @@ describe('buildRevisitRecommendations', () => {
         date: '2026-03-01',
         createdAt: '2026-03-01T10:00:00Z',
       }),
-    ]);
+    ], frozenNow);
 
     expect(recs).toEqual([]);
   });
@@ -104,7 +106,7 @@ describe('buildRevisitRecommendations', () => {
         sourceCount: 9,
         clusterCount: 4,
       }),
-    ]);
+    ], frozenNow);
 
     expect(recs).toHaveLength(2);
     expect(recs[0].topicName).toBe('AI Daily');

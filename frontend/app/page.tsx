@@ -18,6 +18,7 @@ export default function Page() {
   const [topics, setTopics] = useState<Topic[]>([]);
   const [researchRunning, setResearchRunning] = useState(false);
   const [pendingResearchQuery, setPendingResearchQuery] = useState<string | undefined>();
+  const [pendingResearchBriefId, setPendingResearchBriefId] = useState<number | null>(null);
   const [guideDeepActionStarted, setGuideDeepActionStarted] = useState(false);
   const [requestedNewsTopicId, setRequestedNewsTopicId] = useState<number | null>(null);
   const [requestedNewsBriefId, setRequestedNewsBriefId] = useState<number | null>(null);
@@ -35,14 +36,16 @@ export default function Page() {
     loadTopics();
   }, []);
 
-  const handleSendToResearch = useCallback((query: string) => {
+  const handleSendToResearch = useCallback((query: string, briefId?: number | null) => {
     setPendingResearchQuery(query);
+    setPendingResearchBriefId(briefId ?? null);
     setGuideDeepActionStarted(true);
     setPanel('research');
   }, []);
 
   const handlePendingQueryConsumed = useCallback(() => {
     setPendingResearchQuery(undefined);
+    setPendingResearchBriefId(null);
   }, []);
 
   const handleResearchRunningChange = useCallback((running: boolean) => {
@@ -216,6 +219,7 @@ export default function Page() {
             <ResearchPanel
               onRunningChange={handleResearchRunningChange}
               pendingQuery={pendingResearchQuery}
+              pendingBriefId={pendingResearchBriefId}
               onPendingQueryConsumed={handlePendingQueryConsumed}
               isVisible={panel === 'research'}
             />
@@ -224,7 +228,7 @@ export default function Page() {
             <SettingsPanel topics={topics} onTopicsChange={loadTopics} />
           </div>
           <div style={{ display: panel === 'archives' ? 'block' : 'none' }}>
-            <ArchivesPanel topics={topics} />
+            <ArchivesPanel topics={topics} onSendToResearch={handleSendToResearch} />
           </div>
         </div>
       </main>

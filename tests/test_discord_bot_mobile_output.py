@@ -49,6 +49,7 @@ Model launches and agent tooling updates dominated today's cycle, with faster re
     assert "TL;DR" in message
     assert "Key points" in message
     assert "Sources: 3" in message
+    assert "/ask brief_id:42" in message
     assert "```" not in message
     assert "Thematic Clusters" not in message
 
@@ -76,6 +77,7 @@ def test_format_digest_mobile_message_builds_compact_topic_list():
     assert "[13] Global Trending" in message
     assert "Model launches dominated the day." in message
     assert "Trade negotiations remain unstable" in message
+    assert "Follow-up: use /ask brief_id:<id>" in message
     assert "```" not in message
 
 
@@ -84,11 +86,15 @@ def test_format_ask_mobile_message_keeps_reply_short_and_shows_context_layer():
         "reply": "OpenAI shipped a smaller model update this week and emphasized lower-latency agent workflows.",
         "sources": ["2026-03-06 AI Daily", "2026-03-05 AI Builder Signals"],
         "context_layer": "brief_context",
+        "brief_id_used": 42,
+        "context_warning": "brief unavailable, fallback to general context",
     }
 
     message = format_ask_mobile_message(result)
 
     assert "Context: brief_context" in message
+    assert "Brief anchor: #42" in message
+    assert "Warning: brief unavailable, fallback to general context" in message
     assert "Sources: 2" in message
     assert "OpenAI shipped a smaller model update" in message
     assert "```" not in message
@@ -113,12 +119,14 @@ MCP support is moving from experimental integrations to default infrastructure a
         query="latest MCP developments",
         language="English (US)",
         report=report,
+        brief_id=42,
     )
 
     assert "Research complete" in message
     assert "run_123" in message
     assert "latest MCP developments" in message
     assert "Sources: 2" in message
+    assert "Brief anchor: #42" in message
     assert "Latest Viewpoints" in message
     assert "```" not in message
 
@@ -155,12 +163,14 @@ Competition is intensifying across Claude Code, Cursor, and OpenCode.
         subject="OpenAI Codex",
         language="English (US)",
         report=report,
+        brief_id=42,
     )
 
     assert "Analysis complete" in message
     assert "analyze_123" in message
     assert "OpenAI Codex" in message
     assert "Section: Product Overview" in message
+    assert "Brief anchor: #42" in message
     assert "developer-facing AI workflow product" in message
     assert "```" not in message
 

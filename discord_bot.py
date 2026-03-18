@@ -11,6 +11,8 @@ from discord import app_commands
 
 from discord_bot_api import build_api_error_message
 from discord_bot_formatting import (
+    format_brief_mobile_message,
+    format_digest_mobile_message,
     format_analyze_mobile_message,
     chunk_text,
     format_ask_mobile_message,
@@ -19,7 +21,12 @@ from discord_bot_formatting import (
     format_tldr_mobile_message,
 )
 from discord_bot_helpers import is_discord_admin, resolve_topic_reference
-from discord_bot_helpers import build_topic_autocomplete_matches
+from discord_bot_helpers import (
+    build_analyze_payload,
+    build_ask_payload,
+    build_research_payload,
+    build_topic_autocomplete_matches,
+)
 
 
 API_BASE = os.getenv("ARCBRIEF_API_BASE", "http://localhost:8000/api")
@@ -189,6 +196,7 @@ async def latest_brief(interaction: discord.Interaction, topic: str):
         header = f"Latest brief for **{brief.get('topic_name', 'Unknown')}** ({brief.get('date', 'N/A')})"
         chunks = chunk_text(content)
         await interaction.followup.send(header)
+        await interaction.channel.send(format_brief_mobile_message(brief))
         for chunk in chunks:
             await interaction.channel.send(chunk)
     except Exception as e:
@@ -204,7 +212,7 @@ async def latest_brief_topic_autocomplete(
 
 
 @bot.tree.command(name="research", description="Run a deep research query")
-@app_commands.describe(query="Research question", lang="Output language (optional)")
+@app_commands.describe(query="Research question", brief_id="Optional brief anchor ID", lang="Output language (optional)")
 @app_commands.choices(
     lang=[
         app_commands.Choice(name="English", value="en"),
@@ -212,11 +220,16 @@ async def latest_brief_topic_autocomplete(
         app_commands.Choice(name="日本語", value="ja"),
     ]
 )
-async def research(interaction: discord.Interaction, query: str, lang: Optional[app_commands.Choice[str]] = None):
+async def research(
+    interaction: discord.Interaction,
+    query: str,
+    brief_id: Optional[int] = None,
+    lang: Optional[app_commands.Choice[str]] = None,
+):
     await interaction.response.defer(thinking=True)
     try:
         language = await resolve_output_language(lang.value if lang else None)
-        run = await api_post("/run", {"query": query, "language": language})
+        run = await api_post("/run", build_research_payload(query, language, brief_id=brief_id))
         run_id = run.get("run_id")
         if not run_id:
             await interaction.followup.send("Failed to start run.")
@@ -246,6 +259,7 @@ async def research(interaction: discord.Interaction, query: str, lang: Optional[
             query=query,
             language=language,
             report=report,
+            brief_id=brief_id,
         )
         await interaction.channel.send(summary)
 
@@ -257,6 +271,7 @@ async def research(interaction: discord.Interaction, query: str, lang: Optional[
 @app_commands.describe(
     question="Your question (e.g. 'What happened with OpenAI this week?')",
     topic="Optional topic filter: 'ai', 'policy', 'global', 'macro'",
+    brief_id="Optional brief anchor ID",
     lang="Output language (optional)",
 )
 @app_commands.choices(
@@ -270,6 +285,7 @@ async def ask(
     interaction: discord.Interaction,
     question: str,
     topic: Optional[str] = None,
+    brief_id: Optional[int] = None,
     lang: Optional[app_commands.Choice[str]] = None,
 ):
     await interaction.response.defer(thinking=True)
@@ -285,7 +301,10 @@ async def ask(
             pass  # topic filter is optional; proceed without it
 
     try:
-        result = await api_post("/chat", {"message": question, "topic_id": topic_id, "language": language})
+        result = await api_post(
+            "/chat",
+            build_ask_payload(question, language, topic_id=topic_id, brief_id=brief_id),
+        )
         response = format_ask_mobile_message(result)
     except Exception as e:
         response = f"Error fetching answer: {e}"
@@ -316,6 +335,20 @@ async def digest(interaction: discord.Interaction):
         if missing_topics:
             header += f"\nMissing topics: {', '.join(missing_topics)}"
         await interaction.followup.send(header)
+        try:
+            recent = await api_get("/briefs/recent?limit=200")
+            recent_items = recent.get("items", []) if isinstance(recent, dict) else []
+            digest_date = str(digest_doc.get("date") or "")
+            digest_items = [item for item in recent_items if str(item.get("date") or "") == digest_date]
+            latest_by_topic: Dict[int, Dict[str, Any]] = {}
+            for item in (digest_items or recent_items):
+                topic_id = int(item.get("topic_id") or 0)
+                if topic_id not in latest_by_topic:
+                    latest_by_topic[topic_id] = item
+            if latest_by_topic:
+                await interaction.channel.send(format_digest_mobile_message(list(latest_by_topic.values())))
+        except Exception:
+            pass
         for chunk in chunk_text(content):
             await interaction.channel.send(chunk)
     except Exception as e:
@@ -433,7 +466,7 @@ async def tldr(
 
 
 @bot.tree.command(name="analyze", description="Run a PM-style product or company analysis")
-@app_commands.describe(product="Product / company / initiative to analyze", lang="Output language (optional)")
+@app_commands.describe(product="Product / company / initiative to analyze", brief_id="Optional brief anchor ID", lang="Output language (optional)")
 @app_commands.choices(
     lang=[
         app_commands.Choice(name="English", value="en"),
@@ -444,12 +477,13 @@ async def tldr(
 async def analyze(
     interaction: discord.Interaction,
     product: str,
+    brief_id: Optional[int] = None,
     lang: Optional[app_commands.Choice[str]] = None,
 ):
     await interaction.response.defer(thinking=True)
     try:
         language = await resolve_output_language(lang.value if lang else None)
-        run = await api_post("/analyze", {"product": product, "language": language})
+        run = await api_post("/analyze", build_analyze_payload(product, language, brief_id=brief_id))
         run_id = run.get("run_id")
         if not run_id:
             await interaction.followup.send("Failed to start analysis.")
@@ -479,6 +513,7 @@ async def analyze(
             subject=product,
             language=language,
             report=report,
+            brief_id=brief_id,
         )
         await interaction.channel.send(summary)
 

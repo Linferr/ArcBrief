@@ -6,7 +6,7 @@ APP_CONFIG_DEFAULTS = {
     "cognitive_model": "Neutral (Fact-first)",
     "report_language": "English (US)",
     "primary_model": "Qwen3 MAX",
-    "search_provider": "Tavily Search API",
+    "search_provider": "Volcano Engine",
     "brief_generation_framework": "V3",
     "research_recency_mode": "recent_12m_with_90d_anchor",
     "entity_watchlist": "",

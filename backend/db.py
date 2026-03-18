@@ -133,6 +133,10 @@ class ArcBriefDB:
                     report_content TEXT,
                     started_at TEXT,
                     finished_at TEXT,
+                    delivery_status TEXT DEFAULT 'full',
+                    gate_decision TEXT,
+                    blocking_issues TEXT DEFAULT '[]',
+                    metrics_summary TEXT DEFAULT '{}',
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
             """)
@@ -207,7 +211,26 @@ class ArcBriefDB:
                 UNIQUE(topic_id, source_domain)
              )"""),
         (6, "ALTER TABLE research_runs ADD COLUMN language_used TEXT"),
+        (7, "ALTER TABLE research_runs ADD COLUMN delivery_status TEXT DEFAULT 'full'"),
+        (8, "ALTER TABLE research_runs ADD COLUMN gate_decision TEXT"),
+        (9, "ALTER TABLE research_runs ADD COLUMN blocking_issues TEXT DEFAULT '[]'"),
+        (10, "ALTER TABLE research_runs ADD COLUMN metrics_summary TEXT DEFAULT '{}'"),
     ]
+
+    @staticmethod
+    def _duration_seconds(started_at: Optional[str], finished_at: Optional[str]) -> Optional[int]:
+        if not started_at or not finished_at:
+            return None
+        try:
+            start = datetime.fromisoformat(str(started_at).replace("Z", "+00:00"))
+            finish = datetime.fromisoformat(str(finished_at).replace("Z", "+00:00"))
+            if start.tzinfo:
+                start = start.astimezone(tz=None).replace(tzinfo=None)
+            if finish.tzinfo:
+                finish = finish.astimezone(tz=None).replace(tzinfo=None)
+            return max(0, int((finish - start).total_seconds()))
+        except Exception:
+            return None
 
     def _run_migrations(self, conn: sqlite3.Connection) -> None:
         row = conn.execute(
@@ -778,34 +801,85 @@ class ArcBriefDB:
             rows = conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
+    def _normalize_research_run_row(self, row: sqlite3.Row) -> Dict[str, Any]:
+        data = dict(row)
+        data["delivery_status"] = str(data.get("delivery_status") or "full")
+        gate_decision = data.get("gate_decision")
+        data["gate_decision"] = str(gate_decision) if gate_decision not in (None, "") else None
+        raw_issues = data.get("blocking_issues")
+        if isinstance(raw_issues, list):
+            issues = raw_issues
+        else:
+            try:
+                issues = json.loads(raw_issues or "[]")
+            except Exception:
+                issues = []
+        data["blocking_issues"] = [str(item).strip() for item in issues if str(item).strip()]
+        raw_metrics = data.get("metrics_summary")
+        if isinstance(raw_metrics, dict):
+            metrics_summary = raw_metrics
+        else:
+            try:
+                metrics_summary = json.loads(raw_metrics or "{}")
+            except Exception:
+                metrics_summary = {}
+        if not isinstance(metrics_summary, dict):
+            metrics_summary = {}
+        if not metrics_summary:
+            metrics_summary = {
+                "task_completion": data.get("status") == "done",
+                "total_duration_sec": self._duration_seconds(data.get("started_at"), data.get("finished_at")),
+            }
+        data["metrics_summary"] = metrics_summary
+        return data
+
     def save_research_run(self, run_id: str, query: str, status: str,
                           language_used: Optional[str] = None,
                           report_path: Optional[str] = None,
                           report_content: Optional[str] = None,
                           started_at: Optional[str] = None,
-                          finished_at: Optional[str] = None) -> None:
+                          finished_at: Optional[str] = None,
+                          delivery_status: str = "full",
+                          gate_decision: Optional[str] = None,
+                          blocking_issues: Optional[List[str]] = None,
+                          metrics_summary: Optional[Dict[str, Any]] = None) -> None:
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO research_runs
-                (run_id, query, status, language_used, report_path, report_content, started_at, finished_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (run_id, query, status, language_used, report_path, report_content, started_at, finished_at,
+                 delivery_status, gate_decision, blocking_issues, metrics_summary)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (run_id, query, status, language_used, report_path, report_content, started_at, finished_at),
+                (
+                    run_id,
+                    query,
+                    status,
+                    language_used,
+                    report_path,
+                    report_content,
+                    started_at,
+                    finished_at,
+                    delivery_status or "full",
+                    gate_decision,
+                    json.dumps(blocking_issues or [], ensure_ascii=False),
+                    json.dumps(metrics_summary or {}, ensure_ascii=False),
+                ),
             )
 
     def list_research_runs(self, limit: int = 20) -> List[Dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT run_id, query, status, language_used, report_path, report_content, started_at, finished_at, created_at
+                SELECT run_id, query, status, language_used, report_path, report_content, started_at, finished_at,
+                       delivery_status, gate_decision, blocking_issues, metrics_summary, created_at
                 FROM research_runs
                 ORDER BY created_at DESC
                 LIMIT ?
                 """,
                 (limit,),
             ).fetchall()
-        return [dict(r) for r in rows]
+        return [self._normalize_research_run_row(r) for r in rows]
 
     def get_research_run(self, run_id: str) -> Optional[Dict[str, Any]]:
         with self._connect() as conn:
@@ -813,7 +887,7 @@ class ArcBriefDB:
                 "SELECT * FROM research_runs WHERE run_id = ?",
                 (run_id,),
             ).fetchone()
-        return dict(row) if row else None
+        return self._normalize_research_run_row(row) if row else None
 
     def get_user_ingestion(self, url: str) -> Optional[Dict[str, Any]]:
         with self._connect() as conn:

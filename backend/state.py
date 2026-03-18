@@ -1,7 +1,7 @@
 ﻿"""In-memory run store for FastAPI backend."""
 
 from dataclasses import dataclass, field
-from typing import List, Dict, Optional
+from typing import Any, List, Dict, Optional
 from datetime import datetime
 
 
@@ -28,6 +28,10 @@ class RunRecord:
     finished_at: Optional[str] = None
     report_path: Optional[str] = None
     report_content: Optional[str] = None
+    delivery_status: str = "full"
+    gate_decision: Optional[str] = None
+    blocking_issues: List[str] = field(default_factory=list)
+    metrics_summary: Dict[str, Any] = field(default_factory=dict)
     events: List[RunEvent] = field(default_factory=list)
 
 

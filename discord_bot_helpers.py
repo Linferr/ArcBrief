@@ -80,3 +80,32 @@ def build_topic_autocomplete_matches(
         name = str(topic.get("name", ""))
         matches.append((f"{topic_id} | {name}", name))
     return matches
+
+
+def build_research_payload(query: str, language: str, brief_id: Optional[int] = None) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {"query": query, "language": language}
+    if brief_id is not None:
+        payload["brief_id"] = int(brief_id)
+    return payload
+
+
+def build_ask_payload(
+    question: str,
+    language: str,
+    *,
+    topic_id: Optional[int] = None,
+    brief_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {"message": question, "language": language}
+    if topic_id is not None:
+        payload["topic_id"] = int(topic_id)
+    if brief_id is not None:
+        payload["brief_id"] = int(brief_id)
+    return payload
+
+
+def build_analyze_payload(product: str, language: str, brief_id: Optional[int] = None) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {"product": product, "language": language}
+    if brief_id is not None:
+        payload["brief_id"] = int(brief_id)
+    return payload

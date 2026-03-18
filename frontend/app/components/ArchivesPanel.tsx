@@ -6,6 +6,7 @@ import MarkdownViewer from './MarkdownViewer';
 
 interface Props {
   topics: Topic[];
+  onSendToResearch?: (query: string, briefId?: number | null) => void;
 }
 
 const formatBriefTime = (createdAt?: string, dateFallback?: string) => {
@@ -22,7 +23,10 @@ const formatBriefTime = (createdAt?: string, dateFallback?: string) => {
   return 'N/A';
 };
 
-export default function ArchivesPanel({ topics }: Props) {
+const buildArchiveFollowupQuery = (topicName: string, briefDate: string): string =>
+  `Extend the archived ${topicName} brief from ${briefDate}. Re-check the main signals, verify them against current sources, and note what changed since publication.`;
+
+export default function ArchivesPanel({ topics, onSendToResearch }: Props) {
   const [topicFilter, setTopicFilter] = useState<string>('all');
   const [items, setItems] = useState<RecentBrief[]>([]);
   const [loading, setLoading] = useState(false);
@@ -139,20 +143,31 @@ export default function ArchivesPanel({ topics }: Props) {
           <div className="report-toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
             <h4 className="section-eyebrow" style={{ margin: 0 }}>Preview</h4>
             {selectedBrief && (
-
-              <button 
-                className="ghost group" 
-                style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '32px', padding: '0 12px' }} 
-                onClick={() => exportBriefPdf(selectedBrief.id)}
-              >
-                <svg className="icon-line group-hover:stroke-[var(--text-primary)] transition-colors" style={{ width: '14px', height: '14px' }} viewBox="0 0 24 24">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                  <polyline points="7 10 12 15 17 10"></polyline>
-                  <line x1="12" y1="15" x2="12" y2="3"></line>
-                </svg>
-                <span style={{ fontSize: '12px', fontWeight: 500 }}>Export PDF</span>
-              </button>
-
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <button
+                  className="ghost"
+                  onClick={() =>
+                    onSendToResearch?.(
+                      buildArchiveFollowupQuery(selectedBrief.topic_name, selectedBrief.date),
+                      selectedBrief.id,
+                    )
+                  }
+                >
+                  Research This Brief
+                </button>
+                <button 
+                  className="ghost group" 
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '32px', padding: '0 12px' }} 
+                  onClick={() => exportBriefPdf(selectedBrief.id)}
+                >
+                  <svg className="icon-line group-hover:stroke-[var(--text-primary)] transition-colors" style={{ width: '14px', height: '14px' }} viewBox="0 0 24 24">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 10 12 15 17 10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                  </svg>
+                  <span style={{ fontSize: '12px', fontWeight: 500 }}>Export PDF</span>
+                </button>
+              </div>
             )}
           </div>
           {selectedBrief ? (

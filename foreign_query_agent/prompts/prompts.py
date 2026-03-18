@@ -1,7 +1,7 @@
 """Prompt library for the foreign query agent."""
 
 from datetime import datetime
-from typing import Optional
+from typing import Dict, List, Optional
 
 
 _LANGUAGE_HINTS = {
@@ -28,16 +28,71 @@ def recency_instruction(mode: Optional[str]) -> str:
     return f"Recency mode: {normalized}. Current date: {now}."
 
 
-REPORT_STRUCTURE_PROMPT = """
-You are a research planner operating as a senior intelligence analyst.
-Build an outline focused on:
-(a) Latest viewpoints — what has changed in the last 90 days and why it matters.
-(b) Actionable techniques/workflows — concrete steps a practitioner can execute today.
-(c) Concrete tools/config templates — specific repos, config files, CLI commands, or API calls.
-(d) Risks & contrarian views — opposing evidence, failure modes, and second-order consequences.
-Return a JSON array with items: {"title": "", "content": ""}
-Only output valid JSON.
-"""
+_REPORT_STRUCTURE_TEMPLATE_INSTRUCTIONS: Dict[str, str] = {
+    "industry_brief": (
+        "Build an outline focused on:\n"
+        "(a) Latest viewpoints - what has changed in the last 90 days and why it matters.\n"
+        "(b) Actionable techniques/workflows - concrete steps a practitioner can execute today.\n"
+        "(c) Concrete tools/config templates - specific repos, config files, CLI commands, or API calls.\n"
+        "(d) Risks and contrarian views - opposing evidence, failure modes, and second-order consequences."
+    ),
+    "person_profile": (
+        "Build an outline focused on:\n"
+        "(a) Current role and strategic relevance - why this person matters now.\n"
+        "(b) Recent moves, statements, and initiatives - what changed recently and how the person is positioning.\n"
+        "(c) Operating style, network, and leverage - recurring patterns in decision-making, alliances, and influence.\n"
+        "(d) Risks, criticism, and open questions - opposing views, blind spots, and unresolved concerns."
+    ),
+    "policy_analysis": (
+        "Build an outline focused on:\n"
+        "(a) Policy summary and scope - what changed, who is covered, and where the boundaries sit.\n"
+        "(b) Enforcement, stakeholders, and implementation path - how the rule will be executed in practice.\n"
+        "(c) Practical impact and compliance actions - what teams need to change immediately.\n"
+        "(d) Risks, opposition, and second-order effects - unintended consequences, resistance, and unresolved ambiguities."
+    ),
+}
+
+
+_REPORT_STRUCTURE_DEFAULTS: Dict[str, List[Dict[str, str]]] = {
+    "industry_brief": [
+        {"title": "Latest Viewpoints", "content": "What changed recently and why it matters."},
+        {"title": "Actionable Tactics", "content": "Concrete steps, workflows, or operating tactics."},
+        {"title": "Toolchain and Config Templates", "content": "Specific tools, files, settings, or commands to inspect."},
+        {"title": "Risks & Contrarian Views", "content": "Opposing evidence, failure modes, and second-order effects."},
+    ],
+    "person_profile": [
+        {"title": "Current Role and Strategic Relevance", "content": "Why this person matters now and what decisions they influence."},
+        {"title": "Recent Moves and Public Signals", "content": "Recent statements, launches, alliances, or strategic shifts."},
+        {"title": "Operating Style and Influence Network", "content": "Patterns in execution, allies, detractors, and leverage points."},
+        {"title": "Risks, Criticism, and Open Questions", "content": "Credible criticism, reputational risk, and unresolved uncertainties."},
+    ],
+    "policy_analysis": [
+        {"title": "Policy Summary and Scope", "content": "What the policy says, what changed, and who is covered."},
+        {"title": "Enforcement and Stakeholders", "content": "Who enforces it, who is affected, and how implementation will work."},
+        {"title": "Practical Impact and Compliance Actions", "content": "Concrete operational changes required for affected teams."},
+        {"title": "Risks, Opposition, and Open Questions", "content": "Unintended consequences, criticism, and unresolved ambiguities."},
+    ],
+}
+
+
+def report_structure_prompt(template_key: str) -> str:
+    instructions = _REPORT_STRUCTURE_TEMPLATE_INSTRUCTIONS.get(
+        template_key,
+        _REPORT_STRUCTURE_TEMPLATE_INSTRUCTIONS["industry_brief"],
+    )
+    return (
+        "You are a research planner operating as a senior intelligence analyst.\n"
+        f"Template mode: {template_key}.\n"
+        f"{instructions}\n"
+        'Return a JSON array with items: {"title": "", "content": ""}\n'
+        "Only output valid JSON."
+    )
+
+
+def default_outline_for_template(template_key: str) -> List[Dict[str, str]]:
+    defaults = _REPORT_STRUCTURE_DEFAULTS.get(template_key, _REPORT_STRUCTURE_DEFAULTS["industry_brief"])
+    return [dict(item) for item in defaults]
+
 
 FIRST_SEARCH_PROMPT = """
 You are a research retrieval strategist trained in OSINT methodology.
@@ -65,10 +120,11 @@ Return JSON:
 Only output valid JSON.
 """
 
+
 REFLECTION_PROMPT = """
 You are a critical research analyst performing gap analysis.
 Evaluate the current paragraph summary and decide if more search is needed.
-Framework — check each gap type:
+Framework - check each gap type:
 1) RECENCY GAP: does the summary miss updates from the most recent 90 days?
 2) SOURCE GAP: are first-hand sources (X/GitHub/talks/podcasts) missing?
 3) ACTIONABILITY GAP: does the output include concrete templates/workflows/tools?
@@ -91,6 +147,7 @@ If no more search is needed, return an empty list for search_queries.
 Only output valid JSON.
 """
 
+
 SUMMARY_PROMPT = """
 You are a senior research analyst writing an intelligence brief.
 Summarize search results into a dense, analytical section.
@@ -110,10 +167,11 @@ Hard requirements:
 4) Never use these words: groundbreaking, revolutionary, game-changing, cutting-edge,
    paradigm shift, transformative, unprecedented. Use precise, measured language instead.
 
-Tone: academic analyst — precise, evidence-driven, measured. Prefer "X indicates" over "X is amazing."
+Tone: academic analyst - precise, evidence-driven, measured. Prefer "X indicates" over "X is amazing."
 Return JSON: {"paragraph_latest_state": "..."}
 Only output valid JSON.
 """
+
 
 REFLECTION_SUMMARY_PROMPT = """
 You are a senior research analyst refining an intelligence brief with new evidence.
@@ -130,10 +188,11 @@ Hard requirements:
 6) Never use these words: groundbreaking, revolutionary, game-changing, cutting-edge,
    paradigm shift, transformative, unprecedented.
 
-Tone: academic analyst — precise, evidence-driven, measured.
+Tone: academic analyst - precise, evidence-driven, measured.
 Return JSON: {"updated_paragraph_latest_state": "..."}
 Only output valid JSON.
 """
+
 
 FORMAT_PROMPT = """
 You are a senior editor producing an intelligence-grade research report.
@@ -154,7 +213,7 @@ Structural formatting rules:
 - For code, config, or CLI content in "Toolchain and Config Templates", use fenced code blocks.
 
 Content rules:
-- Tone: academic analyst — precise, evidence-driven, measured.
+- Tone: academic analyst - precise, evidence-driven, measured.
 - Keep source anchors from paragraph content (e.g. [S1], [S2]).
 - For significant claims, include a confidence marker: [HIGH CONFIDENCE], [MEDIUM CONFIDENCE],
   or [LOW CONFIDENCE] based on the number and quality of supporting sources.

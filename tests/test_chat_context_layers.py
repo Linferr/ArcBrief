@@ -58,7 +58,7 @@ def test_chat_falls_back_to_article_context_when_briefs_missing(tmp_path, monkey
     monkeypatch.setattr(main, "DB", db)
     monkeypatch.setattr(main, "llm_chat", lambda system, user: "answer from articles")
 
-    result = main.chat_with_briefs(main.ChatRequest(message="agent workflow launch", topic_id=1))
+    result = main.chat_with_briefs(main.ChatRequest(message="agent workflow launch", topic_id=1, days=30))
 
     assert result["reply"] == "answer from articles"
     assert result["context_layer"] == "article_context"

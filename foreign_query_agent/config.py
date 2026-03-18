@@ -34,7 +34,7 @@ class Settings:
     llm_base_url: str = os.getenv("FQ_LLM_BASE_URL", "")
     llm_model: str = os.getenv("FQ_LLM_MODEL", "gpt-4o-mini")
 
-    search_provider: str = os.getenv("ARCBRIEF_SEARCH_PROVIDER", "Tavily Search API")
+    search_provider: str = os.getenv("ARCBRIEF_SEARCH_PROVIDER", "Volcano Engine")
     research_strict_provider: bool = os.getenv("ARCBRIEF_RESEARCH_STRICT_PROVIDER", "1") == "1"
     research_recency_mode: str = os.getenv("ARCBRIEF_RESEARCH_RECENCY_MODE", "recent_12m_with_90d_anchor")
     tavily_api_key: str = os.getenv("TAVILY_API_KEY", "")
@@ -50,6 +50,7 @@ class Settings:
     max_reflections: int = int(os.getenv("FQ_MAX_REFLECTIONS", "3"))
     max_paragraphs: int = int(os.getenv("FQ_MAX_PARAGRAPHS", "4"))
     max_results: int = int(os.getenv("FQ_MAX_RESULTS", "8"))
+    max_parallel_sections: int = int(os.getenv("FQ_MAX_PARALLEL_SECTIONS", "3"))
 
     output_dir: str = os.getenv("FQ_OUTPUT_DIR", "outputs")
 

@@ -142,6 +142,54 @@ def test_run_job_writes_search_provider_event(monkeypatch):
         m.RUNS.pop(run_id, None)
 
 
+def test_run_job_uses_final_search_meta_after_runtime_fallback(monkeypatch):
+    class _FallbackAgent:
+        def __init__(self, settings):
+            self.settings = settings
+            self.search_meta = f.SearchToolBuildMeta(
+                provider_requested=settings.search_provider,
+                provider_effective="Volcano Engine",
+                fallback_reason="",
+                llm_assisted_search=True,
+                openai_compatible=True,
+            )
+
+        def research(self, query, progress_cb=None, language="English (US)"):
+            self.search_meta.provider_effective = "Tavily Search API"
+            self.search_meta.fallback_reason = "Runtime provider fallback: Volcano Engine -> Tavily Search API due to auth_error: 403"
+            if progress_cb:
+                progress_cb(
+                    {
+                        "stage": "warning",
+                        "message": self.search_meta.fallback_reason,
+                        "run_id": "unit",
+                    }
+                )
+            return f"report:{query}:{language}"
+
+        def save_report(self, report, output_dir):
+            return f"{output_dir}/report.md"
+
+    monkeypatch.setattr(m, "Settings", _DummySettings)
+    monkeypatch.setattr(m, "QueryAgent", _FallbackAgent)
+    monkeypatch.setattr(m, "_build_model_candidates", lambda model: [model])
+
+    db = _DummyDB()
+    monkeypatch.setattr(m, "DB", db)
+
+    run_id = "unit-runtime-fallback-observe"
+    m.RUNS[run_id] = RunRecord(run_id=run_id, query="karpathy latest tactics")
+    try:
+        m._run_job(run_id=run_id, query="karpathy latest tactics", language="English (US)")
+        record = m.RUNS[run_id]
+        assert record.status == "done"
+        assert record.metrics_summary["provider_effective"] == "Tavily Search API"
+        assert record.metrics_summary["fallback_triggered"] is True
+        assert "auth_error" in record.metrics_summary["provider_fallback_reason"]
+    finally:
+        m.RUNS.pop(run_id, None)
+
+
 def test_system_status_probes_effective_provider_from_current_config(monkeypatch):
     class _ProbeDB:
         def get_app_config(self):

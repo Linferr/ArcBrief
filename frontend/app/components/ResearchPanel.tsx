@@ -127,12 +127,20 @@ const formatRunTimestamp = (run: RunSummary): string => {
 interface Props {
   onRunningChange?: (running: boolean) => void;
   pendingQuery?: string;
+  pendingBriefId?: number | null;
   onPendingQueryConsumed?: () => void;
   isVisible?: boolean;
 }
 
-export default function ResearchPanel({ onRunningChange, pendingQuery, onPendingQueryConsumed, isVisible }: Props) {
+export default function ResearchPanel({
+  onRunningChange,
+  pendingQuery,
+  pendingBriefId,
+  onPendingQueryConsumed,
+  isVisible,
+}: Props) {
   const [query, setQuery] = useState('');
+  const [briefAnchorId, setBriefAnchorId] = useState<number | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
   const [status, setStatus] = useState('idle');
   const [events, setEvents] = useState<RunEvent[]>([]);
@@ -159,9 +167,10 @@ export default function ResearchPanel({ onRunningChange, pendingQuery, onPending
   useEffect(() => {
     if (pendingQuery) {
       setQuery(pendingQuery);
+      setBriefAnchorId(pendingBriefId ?? null);
       onPendingQueryConsumed?.();
     }
-  }, [pendingQuery, onPendingQueryConsumed]);
+  }, [pendingBriefId, pendingQuery, onPendingQueryConsumed]);
 
   const loadHistory = async (page = 1, append = false) => {
     try {
@@ -245,7 +254,11 @@ export default function ResearchPanel({ onRunningChange, pendingQuery, onPending
       const res = await apiFetch('/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: cleanQuery, language: runLanguage }),
+        body: JSON.stringify({
+          query: cleanQuery,
+          language: runLanguage,
+          brief_id: briefAnchorId ?? undefined,
+        }),
       });
       const data = await res.json();
       if (data.run_id) setRunId(data.run_id);
@@ -389,6 +402,14 @@ export default function ResearchPanel({ onRunningChange, pendingQuery, onPending
       <div className="research-layout">
         <div className="research-main">
           <div className="research-input-section">
+            {briefAnchorId ? (
+              <div className="brief-anchor-banner ui-font">
+                <span>Brief anchor active: #{briefAnchorId}</span>
+                <button className="ghost" onClick={() => setBriefAnchorId(null)} disabled={status === 'running'}>
+                  Clear Anchor
+                </button>
+              </div>
+            ) : null}
             <div className="research-input-wrap">
               <input
                 className="research-query-input custom-input"

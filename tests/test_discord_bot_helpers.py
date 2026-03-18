@@ -6,6 +6,9 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from discord_bot_helpers import (
+    build_analyze_payload,
+    build_ask_payload,
+    build_research_payload,
     build_topic_autocomplete_matches,
     is_discord_admin,
     parse_admin_ids,
@@ -67,3 +70,14 @@ def test_build_topic_autocomplete_matches_prefers_name_matches():
 def test_build_topic_autocomplete_matches_supports_numeric_lookup():
     matches = build_topic_autocomplete_matches("3", TOPICS)
     assert matches[0] == ("3 | AI Daily", "AI Daily")
+
+
+def test_build_followup_payloads_include_optional_brief_anchor():
+    research = build_research_payload("latest signals", "English (US)", brief_id=42)
+    ask = build_ask_payload("What changed?", "English (US)", topic_id=3, brief_id=42)
+    analyze = build_analyze_payload("OpenAI Codex", "English (US)", brief_id=42)
+
+    assert research["brief_id"] == 42
+    assert ask["brief_id"] == 42
+    assert ask["topic_id"] == 3
+    assert analyze["brief_id"] == 42

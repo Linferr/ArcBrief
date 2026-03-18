@@ -10,7 +10,7 @@ interface Props {
   topics: Topic[];
   onNavigateSettings: () => void;
   onNavigateArchive: () => void;
-  onSendToResearch?: (query: string) => void;
+  onSendToResearch?: (query: string, briefId?: number | null) => void;
   requestedTopicId?: number | null;
   requestedBriefId?: number | null;
   onRequestedTopicHandled?: () => void;
@@ -73,6 +73,9 @@ const formatBriefTimestamp = (brief: Brief): string => {
     hour12: false,
   });
 };
+
+const buildBriefFollowupQuery = (topicName: string, briefDate: string): string =>
+  `Deepen the ${topicName} brief from ${briefDate}. Validate the key claims, pull the strongest primary sources, and highlight what changed since the brief.`;
 
 const splitBriefContent = (content: string): { body: string; sources: string[] } => {
   const lines = (content || '').split('\n');
@@ -979,6 +982,17 @@ export default function NewsFeedPanel({
                       )}
 
                       <div className="brief-footer-actions">
+                        <button
+                          className="ghost"
+                          onClick={() =>
+                            onSendToResearch?.(
+                              buildBriefFollowupQuery(activeTopicRecord.name, selectedBrief.date),
+                              selectedBrief.id,
+                            )
+                          }
+                        >
+                          Research This Brief
+                        </button>
                         <button className="export-brief-btn" onClick={() => exportBriefPdf(selectedBrief.id)} title="Export as PDF">
                           Export PDF
                         </button>

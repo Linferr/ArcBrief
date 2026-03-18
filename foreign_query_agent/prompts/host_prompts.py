@@ -18,7 +18,11 @@ game-changing, cutting-edge, paradigm shift, transformative, unprecedented) that
 for evidence-backed analysis.
 
 Return JSON: {
+  "overall_score": 1-5,
+  "gate_decision": "PASS|REVISE|REJECT",
+  "blocking_issues": ["..."],
   "questions": ["..."],
+  "suggested_queries": ["..."],
   "suggested_search_queries": ["..."],
   "critique": "...",
   "source_gaps": "..."

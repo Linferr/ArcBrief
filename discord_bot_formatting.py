@@ -121,6 +121,8 @@ def format_brief_mobile_message(brief: Dict[str, Any]) -> str:
         lines.append("Key points:")
         lines.extend(f"- {point}" for point in points[:3])
     lines.append(f"Sources: {source_count}")
+    if brief_id is not None:
+        lines.append(f"Follow-up: /ask brief_id:{brief_id} ... | /research brief_id:{brief_id} ...")
     return "\n".join(lines)
 
 
@@ -135,6 +137,8 @@ def format_digest_mobile_message(items: List[Dict[str, Any]]) -> str:
             f"{item.get('topic_name', 'Unknown')} ({item.get('date', 'N/A')}): "
             f"{summary_text or 'No summary available.'}"
         )
+    if items:
+        lines.append("Follow-up: use /ask brief_id:<id> or /research brief_id:<id> for a specific brief.")
     return "\n".join(lines)
 
 
@@ -145,6 +149,10 @@ def format_ask_mobile_message(result: Dict[str, Any]) -> str:
     lines = [reply]
     if context_layer:
         lines.append(f"Context: {context_layer}")
+    if result.get("brief_id_used") is not None:
+        lines.append(f"Brief anchor: #{result['brief_id_used']}")
+    if result.get("context_warning"):
+        lines.append(f"Warning: {result['context_warning']}")
     lines.append(f"Sources: {len(sources)}")
     return "\n".join(lines)
 
@@ -155,6 +163,7 @@ def format_research_mobile_message(
     query: str,
     language: str,
     report: str,
+    brief_id: Optional[int] = None,
 ) -> str:
     section = _extract_section(report, _RESEARCH_SECTION_HEADERS)
     summary = _truncate(_extract_first_paragraph(section or report), 320) or "No summary available."
@@ -166,6 +175,7 @@ def format_research_mobile_message(
         "Section: Latest Viewpoints",
         summary,
         f"Sources: {source_count}",
+        f"Brief anchor: #{brief_id}" if brief_id is not None else "Brief anchor: none",
         "Full report is available in the web UI or via the status API.",
     ]
     return "\n".join(lines)
@@ -177,6 +187,7 @@ def format_analyze_mobile_message(
     subject: str,
     language: str,
     report: str,
+    brief_id: Optional[int] = None,
 ) -> str:
     section = _extract_section(report, _ANALYZE_SECTION_HEADERS)
     summary = _truncate(_extract_first_paragraph(section or report), 320) or "No summary available."
@@ -186,6 +197,7 @@ def format_analyze_mobile_message(
         f"Language: {language}",
         "Section: Product Overview",
         summary,
+        f"Brief anchor: #{brief_id}" if brief_id is not None else "Brief anchor: none",
         "Full analysis is available in the web UI or via the status API.",
     ]
     return "\n".join(lines)

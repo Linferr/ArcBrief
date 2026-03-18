@@ -61,8 +61,8 @@ _collecting_topics: Dict[int, bool] = {}
 _collect_lock = threading.Lock()
 _diagnostics_lock = threading.Lock()
 _LAST_SEARCH_DIAGNOSTICS: Dict[str, Any] = {
-    "search_provider_configured": APP_CONFIG_DEFAULTS.get("search_provider", "Tavily Search API"),
-    "search_provider_effective": APP_CONFIG_DEFAULTS.get("search_provider", "Tavily Search API"),
+    "search_provider_configured": APP_CONFIG_DEFAULTS.get("search_provider", "Volcano Engine"),
+    "search_provider_effective": APP_CONFIG_DEFAULTS.get("search_provider", "Volcano Engine"),
     "search_provider_fallback": "",
     "search_llm_assisted": False,
 }
@@ -72,7 +72,7 @@ def _snapshot_search_diagnostics() -> Dict[str, Any]:
     with _diagnostics_lock:
         snap = dict(_LAST_SEARCH_DIAGNOSTICS)
     return {
-        "search_provider_configured": snap.get("search_provider_configured", "Tavily Search API"),
+        "search_provider_configured": snap.get("search_provider_configured", APP_CONFIG_DEFAULTS.get("search_provider", "Volcano Engine")),
         "search_provider_effective": snap.get("search_provider_effective", "Unavailable"),
         "search_provider_fallback": snap.get("search_provider_fallback", ""),
         "search_llm_assisted": bool(snap.get("search_llm_assisted", False)),
@@ -611,11 +611,13 @@ async def api_key_guard(request: Request, call_next):
 class RunRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=500)
     language: Optional[str] = Field(default=None, max_length=64)
+    brief_id: Optional[int] = Field(default=None, gt=0)
 
 
 class AnalyzeRequest(BaseModel):
     product: str = Field(..., min_length=1, max_length=500)
     language: Optional[str] = Field(default=None, max_length=64)
+    brief_id: Optional[int] = Field(default=None, gt=0)
 
 
 class BookmarkCreateRequest(BaseModel):
@@ -637,6 +639,10 @@ class StatusResponse(BaseModel):
     report_path: Optional[str] = None
     report_content: Optional[str] = None
     language_used: Optional[str] = None
+    delivery_status: str = "full"
+    gate_decision: Optional[str] = None
+    blocking_issues: List[str] = Field(default_factory=list)
+    metrics_summary: Dict[str, Any] = Field(default_factory=dict)
 
 
 class TopicCreateRequest(BaseModel):
@@ -829,6 +835,60 @@ def _parse_iso(value: Optional[str]) -> Optional[datetime]:
         return None
 
 
+def _parse_provider_event_message(message: str) -> Dict[str, str]:
+    payload: Dict[str, str] = {}
+    for key in ("configured", "effective", "llm_assisted"):
+        match = re.search(rf"{key}=([^\s]+(?:\s(?!\w+=)[^\s]+)*)", message or "")
+        if match:
+            payload[key] = match.group(1).strip()
+    return payload
+
+
+def _build_metrics_summary(
+    record: RunRecord,
+    *,
+    provider_effective: str = "",
+    provider_fallback_reason: str = "",
+) -> Dict[str, Any]:
+    search_calls = 0
+    reflection_rounds: set[tuple[str, int]] = set()
+    provider_from_events = ""
+    fallback_from_events = provider_fallback_reason or ""
+
+    for event in record.events:
+        if event.stage == "search":
+            search_calls += 1
+        elif event.stage == "reflection" and (event.message or "").lower().startswith("reflection search:"):
+            search_calls += 1
+            if event.round is not None:
+                reflection_rounds.add((event.paragraph or str(event.paragraph_idx or ""), int(event.round)))
+        elif event.stage == "search_provider":
+            payload = _parse_provider_event_message(event.message)
+            provider_from_events = payload.get("effective", provider_from_events)
+        elif event.stage in {"warning", "error"}:
+            lowered = (event.message or "").lower()
+            if "fallback" in lowered or "provider_unavailable" in lowered:
+                fallback_from_events = event.message
+
+    finished = _parse_iso(record.finished_at)
+    started = _parse_iso(record.started_at)
+    duration = None
+    if started and finished:
+        duration = max(0, int((finished - started).total_seconds()))
+
+    effective_provider = provider_effective or provider_from_events
+    return {
+        "task_completion": record.status == "done",
+        "total_duration_sec": duration,
+        "step_count": len(record.events),
+        "search_calls": search_calls,
+        "reflection_rounds": len(reflection_rounds),
+        "fallback_triggered": bool(fallback_from_events),
+        "provider_effective": effective_provider,
+        "provider_fallback_reason": fallback_from_events,
+    }
+
+
 def _cleanup_inmemory_runs() -> int:
     cutoff = datetime.utcnow() - timedelta(hours=max(1, RUNS_TTL_HOURS))
     to_remove: set[str] = set()
@@ -906,12 +966,56 @@ def _rewrite_analysis_report(report: str, product: str, language: str) -> str:
     return fallback
 
 
-def _run_job(run_id: str, query: str, language: str, run_type: str = "research") -> None:
+def _compact_brief_anchor_excerpt(content: str, limit: int = 1800) -> str:
+    text = content or ""
+    source_header = re.search(r"^##\s+(sources|来源|ソース)\s*$", text, flags=re.IGNORECASE | re.MULTILINE)
+    if source_header:
+        text = text[: source_header.start()]
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "…"
+
+
+def _resolve_brief_anchor(brief_id: int) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
+    if DB is None:
+        return None, f"Brief anchor unavailable for brief_id={brief_id}: DB not initialized."
+    brief = DB.get_brief_by_id(brief_id)
+    if not brief:
+        return None, f"Brief anchor unavailable for brief_id={brief_id}; fallback to general context."
+    topic = DB.get_topic(brief["topic_id"])
+    topic_name = topic.name if topic else f"Topic {brief['topic_id']}"
+    excerpt = _compact_brief_anchor_excerpt(brief.get("content") or "")
+    return (
+        {
+            "brief_id": int(brief["id"]),
+            "topic_id": int(brief["topic_id"]),
+            "topic_name": topic_name,
+            "date": brief.get("date") or "",
+            "excerpt": excerpt,
+            "source_label": f"Brief | {topic_name} | {brief.get('date') or 'N/A'} | #{brief['id']}",
+            "context_block": f"[Brief Anchor | {topic_name} | {brief.get('date') or 'N/A'} | #{brief['id']}]\n{excerpt}",
+        },
+        None,
+    )
+
+
+def _run_job(
+    run_id: str,
+    query: str,
+    language: str,
+    run_type: str = "research",
+    brief_id: Optional[int] = None,
+) -> None:
     record = RUNS[run_id]
     record.status = "running"
     record.started_at = datetime.utcnow().isoformat()
     record.language_used = _normalize_language(language)
     record.run_type = run_type
+    record.delivery_status = "full"
+    record.gate_decision = None
+    record.blocking_issues = []
+    record.metrics_summary = {}
 
     try:
         settings = Settings(output_dir="outputs")
@@ -940,6 +1044,8 @@ def _run_job(run_id: str, query: str, language: str, run_type: str = "research")
         model_candidates = _build_model_candidates(settings.llm_model)
         report = None
         path = None
+        provider_effective = configured_search_provider
+        provider_fallback_reason = ""
 
         for idx, candidate_model in enumerate(model_candidates):
             settings.llm_model = candidate_model
@@ -947,6 +1053,7 @@ def _run_job(run_id: str, query: str, language: str, run_type: str = "research")
                 agent = QueryAgent(settings)
             except ProviderUnavailableError as provider_err:
                 meta = provider_err.meta
+                provider_effective = meta.provider_effective
                 record.events.append(
                     RunEvent(
                         stage="search_provider",
@@ -958,6 +1065,7 @@ def _run_job(run_id: str, query: str, language: str, run_type: str = "research")
                     )
                 )
                 unavailable_reason = meta.fallback_reason or str(provider_err)
+                provider_fallback_reason = unavailable_reason
                 record.events.append(RunEvent(stage="error", message=f"PROVIDER_UNAVAILABLE: {unavailable_reason}"))
                 with _diagnostics_lock:
                     _LAST_SEARCH_DIAGNOSTICS.update(
@@ -972,6 +1080,8 @@ def _run_job(run_id: str, query: str, language: str, run_type: str = "research")
             meta = getattr(agent, "search_meta", None)
 
             if meta is not None:
+                provider_effective = meta.provider_effective
+                provider_fallback_reason = meta.fallback_reason or provider_fallback_reason
                 record.events.append(
                     RunEvent(
                         stage="search_provider",
@@ -992,6 +1102,8 @@ def _run_job(run_id: str, query: str, language: str, run_type: str = "research")
                         }
                     )
             else:
+                provider_effective = configured_search_provider
+                provider_fallback_reason = ""
                 with _diagnostics_lock:
                     _LAST_SEARCH_DIAGNOSTICS.update(
                         {
@@ -1006,6 +1118,27 @@ def _run_job(run_id: str, query: str, language: str, run_type: str = "research")
                 record.events.append(RunEvent(**evt))
 
             raw_query = _build_analyze_query(query) if run_type == "analyze" else query
+            if brief_id is not None:
+                anchor, anchor_warning = _resolve_brief_anchor(brief_id)
+                if anchor is not None:
+                    record.events.append(
+                        RunEvent(
+                            stage="brief_anchor",
+                            message=(
+                                f"Using brief_id={anchor['brief_id']} "
+                                f"topic={anchor['topic_name']} "
+                                f"date={anchor['date']}"
+                            ),
+                        )
+                    )
+                    raw_query = (
+                        f"{raw_query}\n\n"
+                        f"Brief anchor:\n{anchor['context_block']}\n\n"
+                        "Use the anchored brief as follow-up context, but verify all claims with fresh evidence "
+                        "before including them in the final report."
+                    )
+                elif anchor_warning:
+                    record.events.append(RunEvent(stage="warning", message=anchor_warning))
             safe_query = _sanitize_query(raw_query)
             try:
                 report = agent.research(
@@ -1013,6 +1146,17 @@ def _run_job(run_id: str, query: str, language: str, run_type: str = "research")
                     progress_cb=progress_cb,
                     language=record.language_used,
                 )
+                final_meta = getattr(agent, "search_meta", None)
+                if final_meta is not None:
+                    provider_effective = final_meta.provider_effective
+                    provider_fallback_reason = final_meta.fallback_reason or provider_fallback_reason
+                agent_state = getattr(agent, "last_state", None)
+                if agent_state is not None:
+                    record.delivery_status = str(getattr(agent_state, "delivery_status", "full") or "full")
+                    gate_decision = getattr(agent_state, "gate_decision", None)
+                    record.gate_decision = str(gate_decision) if gate_decision not in (None, "") else None
+                    raw_issues = getattr(agent_state, "blocking_issues", []) or []
+                    record.blocking_issues = [str(item).strip() for item in raw_issues if str(item).strip()]
                 if run_type == "analyze":
                     report = _rewrite_analysis_report(report, query, record.language_used)
                 path = agent.save_report(report, settings.output_dir)
@@ -1041,18 +1185,32 @@ def _run_job(run_id: str, query: str, language: str, run_type: str = "research")
         record.report_path = path
         record.report_content = report
         record.status = "done"
+        record.metrics_summary = _build_metrics_summary(
+            record,
+            provider_effective=provider_effective,
+            provider_fallback_reason=provider_fallback_reason,
+        )
 
     except Exception as e:
         error_msg = f"Research failed: {str(e)}"
         record.events.append(RunEvent(stage="error", message=error_msg))
         record.status = "failed"
+        record.delivery_status = "unavailable"
+        record.gate_decision = None
+        record.blocking_issues = []
         record.report_content = f"# Error\n\n{error_msg}\n\nPlease try again or adjust your query."
+        record.metrics_summary = _build_metrics_summary(record)
 
     finally:
         global _active_research
         with _research_lock:
             _active_research = max(_active_research - 1, 0)
         record.finished_at = datetime.utcnow().isoformat()
+        record.metrics_summary = _build_metrics_summary(
+            record,
+            provider_effective=str(record.metrics_summary.get("provider_effective") or ""),
+            provider_fallback_reason=str(record.metrics_summary.get("provider_fallback_reason") or ""),
+        )
         # Persist to DB
         if DB is not None:
             try:
@@ -1065,6 +1223,10 @@ def _run_job(run_id: str, query: str, language: str, run_type: str = "research")
                     report_content=record.report_content,
                     started_at=record.started_at,
                     finished_at=record.finished_at,
+                    delivery_status=record.delivery_status,
+                    gate_decision=record.gate_decision,
+                    blocking_issues=record.blocking_issues,
+                    metrics_summary=record.metrics_summary,
                 )
             except Exception as db_err:
                 logger.error("Failed to persist research run %s: %s", run_id, db_err)
@@ -1169,11 +1331,11 @@ def system_status():
                 effective_max_reflections = 1
             with _diagnostics_lock:
                 _LAST_SEARCH_DIAGNOSTICS["search_provider_configured"] = str(
-                    merged.get("search_provider", _LAST_SEARCH_DIAGNOSTICS.get("search_provider_configured", "Tavily Search API"))
+                    merged.get("search_provider", _LAST_SEARCH_DIAGNOSTICS.get("search_provider_configured", APP_CONFIG_DEFAULTS.get("search_provider", "Volcano Engine")))
                 )
         except Exception:
             pass
-    configured_provider = str(merged.get("search_provider", "Tavily Search API"))
+    configured_provider = str(merged.get("search_provider", APP_CONFIG_DEFAULTS.get("search_provider", "Volcano Engine")))
     try:
         settings_probe = Settings(output_dir="outputs")
         _tool, meta = create_search_tool_with_meta(
@@ -1358,7 +1520,11 @@ def start_run(payload: RunRequest):
         raise HTTPException(status_code=400, detail="Run already exists")
     record = RunRecord(run_id=run_id, query=payload.query, run_type="research", language_used=language_used)
     RUNS[run_id] = record
-    thread = threading.Thread(target=_run_job, args=(run_id, payload.query, language_used, "research"), daemon=True)
+    thread = threading.Thread(
+        target=_run_job,
+        args=(run_id, payload.query, language_used, "research", payload.brief_id),
+        daemon=True,
+    )
     thread.start()
     return RunResponse(run_id=run_id, status="running", language_used=language_used)
 
@@ -1382,7 +1548,11 @@ def start_analysis(payload: AnalyzeRequest):
         raise HTTPException(status_code=400, detail="Run already exists")
     record = RunRecord(run_id=run_id, query=payload.product, run_type="analyze", language_used=language_used)
     RUNS[run_id] = record
-    thread = threading.Thread(target=_run_job, args=(run_id, payload.product, language_used, "analyze"), daemon=True)
+    thread = threading.Thread(
+        target=_run_job,
+        args=(run_id, payload.product, language_used, "analyze", payload.brief_id),
+        daemon=True,
+    )
     thread.start()
     return RunResponse(run_id=run_id, status="running", language_used=language_used)
 
@@ -1398,6 +1568,10 @@ def get_status(run_id: str):
             report_path=record.report_path,
             report_content=record.report_content,
             language_used=record.language_used,
+            delivery_status=record.delivery_status,
+            gate_decision=record.gate_decision,
+            blocking_issues=list(record.blocking_issues),
+            metrics_summary=dict(record.metrics_summary),
         )
     if DB is not None:
         row = DB.get_research_run(run_id)
@@ -1409,6 +1583,10 @@ def get_status(run_id: str):
                 report_path=row.get("report_path"),
                 report_content=row.get("report_content"),
                 language_used=row.get("language_used"),
+                delivery_status=str(row.get("delivery_status") or "full"),
+                gate_decision=row.get("gate_decision"),
+                blocking_issues=list(row.get("blocking_issues") or []),
+                metrics_summary=dict(row.get("metrics_summary") or {}),
             )
     raise HTTPException(status_code=404, detail="Run not found")
 
@@ -1431,6 +1609,10 @@ def get_history(page: int = 1, size: int = 10, status: Optional[str] = None, q: 
             "finished_at": r.finished_at,
             "created_at": r.started_at or r.finished_at,
             "report_path": r.report_path,
+            "delivery_status": r.delivery_status,
+            "gate_decision": r.gate_decision,
+            "blocking_issues": list(r.blocking_issues),
+            "metrics_summary": dict(r.metrics_summary),
             "source_count": _estimate_source_count(r.report_content),
         })
     if DB is not None:
@@ -1438,6 +1620,9 @@ def get_history(page: int = 1, size: int = 10, status: Optional[str] = None, q: 
             if row["run_id"] not in memory_ids:
                 row["source_count"] = _estimate_source_count(row.get("report_content"))
                 row.pop("report_content", None)
+                row["delivery_status"] = str(row.get("delivery_status") or "full")
+                row["blocking_issues"] = list(row.get("blocking_issues") or [])
+                row["metrics_summary"] = dict(row.get("metrics_summary") or {})
                 results.append(row)
     # Filter
     if status:
@@ -2170,6 +2355,7 @@ def update_topic(topic_id: int, payload: TopicUpdateRequest):
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=500)
     topic_id: Optional[int] = None
+    brief_id: Optional[int] = Field(default=None, gt=0)
     days: int = Field(default=7, ge=1, le=30)
     language: Optional[str] = Field(default=None, max_length=64)
 
@@ -2212,6 +2398,15 @@ def _chat_config_value(key: str, default: Any) -> Any:
         return config.get(key, default)
     except Exception:
         return default
+
+
+def _build_anchored_brief_chat_context(req: "ChatRequest") -> tuple[str, str, List[str], Optional[str], Optional[int]]:
+    if req.brief_id is None:
+        return "", "", [], None, None
+    anchor, warning = _resolve_brief_anchor(req.brief_id)
+    if anchor is None:
+        return "", "", [], warning, None
+    return "brief_anchor", anchor["context_block"], [anchor["source_label"]], None, anchor["brief_id"]
 
 
 def _build_brief_chat_context(req: "ChatRequest") -> tuple[str, str, List[str]]:
@@ -2276,7 +2471,7 @@ def _build_ingestion_chat_context(req: "ChatRequest") -> tuple[str, str, List[st
 def _build_web_fallback_chat_context(req: "ChatRequest") -> tuple[str, str, List[str]]:
     if DB is None:
         return "", "", []
-    configured_provider = str(_chat_config_value("search_provider", APP_CONFIG_DEFAULTS.get("search_provider", "Tavily Search API")))
+    configured_provider = str(_chat_config_value("search_provider", APP_CONFIG_DEFAULTS.get("search_provider", "Volcano Engine")))
     settings = Settings(output_dir="outputs")
     tool, _meta = create_search_tool_with_meta(
         configured_provider,
@@ -2377,12 +2572,17 @@ def chat_with_briefs(req: ChatRequest):
         context_layer = ""
         context = ""
         sources: List[str] = []
+        context_warning: Optional[str] = None
+        brief_id_used: Optional[int] = None
+        context_layer, context, sources, context_warning, brief_id_used = _build_anchored_brief_chat_context(req)
         for builder in (
             _build_brief_chat_context,
             _build_article_chat_context,
             _build_ingestion_chat_context,
             _build_web_fallback_chat_context,
         ):
+            if context:
+                break
             context_layer, context, sources = builder(req)
             if context:
                 break
@@ -2393,6 +2593,8 @@ def chat_with_briefs(req: ChatRequest):
                 "sources": [],
                 "context_layer": "none",
                 "language_used": language_used,
+                "brief_id_used": None,
+                "context_warning": context_warning,
             }
 
         language_hint = {
@@ -2418,6 +2620,8 @@ def chat_with_briefs(req: ChatRequest):
             "sources": sources,
             "context_layer": context_layer,
             "language_used": language_used,
+            "brief_id_used": brief_id_used,
+            "context_warning": context_warning,
         }
     finally:
         with _chat_lock:
