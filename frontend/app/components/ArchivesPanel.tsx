@@ -176,7 +176,7 @@ export default function ArchivesPanel({ topics, onSendToResearch }: Props) {
                 <span style={{ fontFamily: 'var(--font-serif)', fontSize: '15px', fontWeight: 'bold', color: 'var(--text-primary)' }}>{selectedBrief.topic_name}</span>
                 <span>{formatBriefTime(selectedBrief.created_at, selectedBrief.date)}</span>
               </div>
-              <MarkdownViewer content={selectedBrief.content} />
+              <MarkdownViewer content={selectedBrief.content} variant="brief" className="brief-content" />
             </div>
           ) : (
             <div className="muted" style={{ padding: '24px', background: 'var(--bg-sidebar)', border: '1px solid var(--border-color)', borderRadius: '4px' }}>Select a brief to preview content.</div>

@@ -1,8 +1,9 @@
-﻿"""LLM client wrappers."""
+"""LLM client wrappers."""
 
 from dataclasses import dataclass
-from typing import Dict, Any
 from datetime import datetime
+import os
+from typing import Any, Dict
 
 try:
     from openai import OpenAI
@@ -15,6 +16,30 @@ class LLMConfig:
     api_key: str
     model: str
     base_url: str = ""
+    prompt_cost_per_1k: float = float(os.getenv("FQ_LLM_PROMPT_COST_PER_1K", "0"))
+    completion_cost_per_1k: float = float(os.getenv("FQ_LLM_COMPLETION_COST_PER_1K", "0"))
+
+
+@dataclass
+class LLMUsageSummary:
+    request_count: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    estimated_cost_usd: float = 0.0
+    model_requested: str = ""
+    model_effective: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "request_count": self.request_count,
+            "prompt_tokens": self.prompt_tokens,
+            "completion_tokens": self.completion_tokens,
+            "total_tokens": self.total_tokens,
+            "estimated_cost_usd": round(self.estimated_cost_usd, 6),
+            "model_requested": self.model_requested,
+            "model_effective": self.model_effective,
+        }
 
 
 class LLMClient:
@@ -38,6 +63,25 @@ class LLMClient:
             kwargs["base_url"] = config.base_url
         self.client = OpenAI(**kwargs)
         self.model = config.model
+        self.prompt_cost_per_1k = config.prompt_cost_per_1k
+        self.completion_cost_per_1k = config.completion_cost_per_1k
+        self.usage = LLMUsageSummary(model_requested=config.model, model_effective=config.model)
+
+    def _record_usage(self, response: Any) -> None:
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            return
+        prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+        completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
+        total_tokens = int(getattr(usage, "total_tokens", prompt_tokens + completion_tokens) or 0)
+        self.usage.request_count += 1
+        self.usage.prompt_tokens += prompt_tokens
+        self.usage.completion_tokens += completion_tokens
+        self.usage.total_tokens += total_tokens
+        self.usage.estimated_cost_usd += (
+            (prompt_tokens / 1000.0) * self.prompt_cost_per_1k
+            + (completion_tokens / 1000.0) * self.completion_cost_per_1k
+        )
 
     def invoke(self, system_prompt: str, user_prompt: str) -> str:
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -54,6 +98,7 @@ class LLMClient:
                     ],
                     timeout=self.DEFAULT_TIMEOUT,
                 )
+                self._record_usage(response)
                 if response.choices and response.choices[0].message:
                     return (response.choices[0].message.content or "").strip()
                 return ""
@@ -61,25 +106,47 @@ class LLMClient:
                 last_error = e
                 if attempt < self.MAX_RETRIES:
                     import time
-                    time.sleep(2 ** attempt)  # Exponential backoff: 1s, 2s
+
+                    time.sleep(2**attempt)
                     continue
                 break
 
-        # All retries failed
         raise RuntimeError(f"LLM call failed after {self.MAX_RETRIES + 1} attempts: {last_error}")
+
+    def usage_summary(self) -> Dict[str, Any]:
+        return self.usage.to_dict()
 
 
 class MockLLM:
     """Deterministic mock LLM for offline tests."""
 
+    def __init__(self):
+        self.usage = LLMUsageSummary(model_requested="mock", model_effective="mock")
+
     def invoke(self, system_prompt: str, user_prompt: str) -> str:
+        self.usage.request_count += 1
         text = (system_prompt or "").lower()
-        if "report structure" in text:
+        if "premise validation analyst" in text:
+            return "{}"
+        if "template mode" in text:
+            if "template mode: claim_audit" in text:
+                return (
+                    "{"
+                    "\"report_type\":\"claim_audit\","
+                    "\"sections\":["
+                    "{\"title\":\"Official Status Check\",\"content\":\"Verify whether the claim is real in official channels.\",\"evidence_type\":\"official\",\"target_words\":360},"
+                    "{\"title\":\"Where The Claim Came From\",\"content\":\"Trace rumor origin and secondary amplification.\",\"evidence_type\":\"contrarian\",\"target_words\":340},"
+                    "{\"title\":\"What Is Actually True Now\",\"content\":\"Summarize the real current facts users should rely on.\",\"evidence_type\":\"official\",\"target_words\":420},"
+                    "{\"title\":\"Practical Takeaways\",\"content\":\"Explain what users should do after the claim is corrected.\",\"evidence_type\":\"mixed\",\"target_words\":320}"
+                    "]}"
+                )
             return (
-                "["
-                "{\"title\":\"Overview\",\"content\":\"High-level context and key points.\"},"
-                "{\"title\":\"Key Developments\",\"content\":\"Recent events and updates.\"}"
-                "]"
+                "{"
+                "\"report_type\":\"industry_brief\","
+                "\"sections\":["
+                "{\"title\":\"Overview\",\"content\":\"High-level context and key points.\",\"evidence_type\":\"mixed\",\"target_words\":260},"
+                "{\"title\":\"Key Developments\",\"content\":\"Recent events and updates.\",\"evidence_type\":\"official\",\"target_words\":260}"
+                "]}"
             )
         if "search tool" in text:
             return (
@@ -106,6 +173,8 @@ class MockLLM:
         if "updated_paragraph_latest_state" in text:
             return "{\"updated_paragraph_latest_state\":\"Mock improved summary with added evidence.\"}"
         if "format" in text:
-            return "# Report\n\n## Overview\nMock final report."
+            return "# Long-Form Analysis\n\n## Overview\nMock final report."
         return "{}"
 
+    def usage_summary(self) -> Dict[str, Any]:
+        return self.usage.to_dict()

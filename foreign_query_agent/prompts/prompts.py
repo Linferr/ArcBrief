@@ -43,12 +43,26 @@ _REPORT_STRUCTURE_TEMPLATE_INSTRUCTIONS: Dict[str, str] = {
         "(c) Operating style, network, and leverage - recurring patterns in decision-making, alliances, and influence.\n"
         "(d) Risks, criticism, and open questions - opposing views, blind spots, and unresolved concerns."
     ),
+    "company_analysis": (
+        "Build an outline focused on:\n"
+        "(a) Strategic context and why the company matters now.\n"
+        "(b) Product, business model, and monetization signals.\n"
+        "(c) Competitive position, distribution, and execution leverage.\n"
+        "(d) Risks, counter-evidence, and unresolved watchpoints."
+    ),
     "policy_analysis": (
         "Build an outline focused on:\n"
         "(a) Policy summary and scope - what changed, who is covered, and where the boundaries sit.\n"
         "(b) Enforcement, stakeholders, and implementation path - how the rule will be executed in practice.\n"
         "(c) Practical impact and compliance actions - what teams need to change immediately.\n"
         "(d) Risks, opposition, and second-order effects - unintended consequences, resistance, and unresolved ambiguities."
+    ),
+    "claim_audit": (
+        "Build an outline focused on:\n"
+        "(a) Official status check - verify whether the claim is real using official or first-hand evidence.\n"
+        "(b) Where the claim came from - rumor origin, confusion source, or misinterpretation path.\n"
+        "(c) What is actually true now - the real current product, API, policy, or timeline facts.\n"
+        "(d) Practical takeaways - what a user should do after the claim is corrected."
     ),
 }
 
@@ -66,13 +80,78 @@ _REPORT_STRUCTURE_DEFAULTS: Dict[str, List[Dict[str, str]]] = {
         {"title": "Operating Style and Influence Network", "content": "Patterns in execution, allies, detractors, and leverage points."},
         {"title": "Risks, Criticism, and Open Questions", "content": "Credible criticism, reputational risk, and unresolved uncertainties."},
     ],
+    "company_analysis": [
+        {"title": "Strategic Context", "content": "Why the company matters now and which external forces shape the analysis."},
+        {"title": "Product, Revenue, and Operating Model", "content": "What the company sells, how it monetizes, and what operating signals matter most."},
+        {"title": "Competitive Position and Execution", "content": "Relative advantages, distribution, partners, and execution leverage."},
+        {"title": "Risks, Counter-Evidence, and Watchpoints", "content": "What could break the thesis, which criticisms matter, and what to monitor next."},
+    ],
     "policy_analysis": [
         {"title": "Policy Summary and Scope", "content": "What the policy says, what changed, and who is covered."},
         {"title": "Enforcement and Stakeholders", "content": "Who enforces it, who is affected, and how implementation will work."},
         {"title": "Practical Impact and Compliance Actions", "content": "Concrete operational changes required for affected teams."},
         {"title": "Risks, Opposition, and Open Questions", "content": "Unintended consequences, criticism, and unresolved ambiguities."},
     ],
+    "claim_audit": [
+        {
+            "title": "Official Status Check",
+            "content": "Verify whether the named version, event, or claim is real in official channels.",
+        },
+        {
+            "title": "Where The Claim Came From",
+            "content": "Trace rumor origin, naming confusion, or secondary-source amplification.",
+        },
+        {
+            "title": "What Is Actually True Now",
+            "content": "Summarize the real current facts, releases, or timeline that users should rely on instead.",
+        },
+        {
+            "title": "Practical Takeaways",
+            "content": "Translate the corrected understanding into immediate user or builder actions.",
+        },
+    ],
 }
+
+
+def section_word_budget(length_preset: str, sections: int) -> int:
+    normalized = (length_preset or "").strip().lower() or "long"
+    total_budget = {
+        "short": 900,
+        "medium": 1400,
+        "long": 1900,
+    }.get(normalized, 1900)
+    safe_sections = max(1, sections)
+    return max(220, int(total_budget / safe_sections))
+
+
+def default_section_contract(template_key: str, length_preset: str = "long") -> List[Dict[str, object]]:
+    defaults = default_outline_for_template(template_key)
+    target_words = section_word_budget(length_preset, len(defaults))
+    contracts: List[Dict[str, object]] = []
+    for item in defaults:
+        lowered_title = str(item.get("title") or "").lower()
+        evidence_type = "mixed"
+        if "risk" in lowered_title or "criticism" in lowered_title or "watchpoint" in lowered_title:
+            evidence_type = "contrarian"
+        elif "policy" in lowered_title or "enforcement" in lowered_title or "compliance" in lowered_title:
+            evidence_type = "official"
+        elif "official status" in lowered_title or "actually true" in lowered_title:
+            evidence_type = "official"
+        elif "claim came from" in lowered_title:
+            evidence_type = "contrarian"
+        elif "product" in lowered_title or "revenue" in lowered_title or "competitive" in lowered_title:
+            evidence_type = "market"
+        contracts.append(
+            {
+                "title": item["title"],
+                "content": item["content"],
+                "evidence_type": evidence_type,
+                "target_words": target_words,
+                "pass_criteria": "Cite credible evidence, surface contradictions, and avoid unsupported claims.",
+                "subquestions": [],
+            }
+        )
+    return contracts
 
 
 def report_structure_prompt(template_key: str) -> str:
@@ -84,9 +163,42 @@ def report_structure_prompt(template_key: str) -> str:
         "You are a research planner operating as a senior intelligence analyst.\n"
         f"Template mode: {template_key}.\n"
         f"{instructions}\n"
-        'Return a JSON array with items: {"title": "", "content": ""}\n'
+        "Return JSON with this shape:\n"
+        '{'
+        '"report_type":"...",'
+        '"sections":[{"title":"","content":"","evidence_type":"mixed|market|official|contrarian","target_words":260,"pass_criteria":"","subquestions":["..."]}]}'
+        "\n"
+        "Use 4-6 sections. Keep target_words realistic for a long-form analytical report."
+        "\n"
         "Only output valid JSON."
     )
+
+
+PREMISE_CHECK_PROMPT = """
+You are a premise validation analyst.
+Before full research begins, determine whether the user's query contains a factual premise
+that should be validated first.
+
+Classify as:
+- valid: premise is plausible and can proceed as written
+- disputed: premise is not clearly established and must be checked first
+- invalid: premise is directly contradicted by official or first-hand evidence
+
+If disputed or invalid:
+- rewrite the query into a safer research objective that first verifies the claim
+- recommend report_type = claim_audit
+- propose 2-4 official queries that should be searched first
+
+Return JSON:
+{
+  "premise_status": "valid|disputed|invalid",
+  "reframed_query": "...",
+  "recommended_report_type": "claim_audit|industry_brief|company_analysis|person_profile|policy_analysis|",
+  "validation_notes": "...",
+  "official_queries": ["...", "..."]
+}
+Only output valid JSON.
+"""
 
 
 def default_outline_for_template(template_key: str) -> List[Dict[str, str]]:
@@ -99,13 +211,15 @@ You are a research retrieval strategist trained in OSINT methodology.
 Generate a search query package, not a single broad query.
 Hard requirements:
 1) Include one query anchored to the most recent 90 days.
-2) Prioritize first-hand sources: X/Twitter posts, GitHub repos/README,
-   long-form blogs, podcasts/interviews, direct talks, and official documentation.
-3) Prioritize practical extraction: templates, config files, concrete workflows, toolchains,
-   and specific action steps.
+2) Prioritize first-hand or official sources when available: official statements, docs,
+   filings, transcripts, GitHub repos/README, direct talks, podcasts/interviews, and company/policy primary materials.
+3) Prioritize evidence that helps answer the section contract, not broad background filler.
 4) Include a contrarian/skeptical query that seeks evidence AGAINST the prevailing narrative
    (failure reports, criticism, limitations, alternative approaches).
-5) Inject modern AI workflow terms when relevant: Vibe Coding, Agentic Engineering, RLVR, Claws.
+5) When the topic is a company, include at least one query for business model, product, revenue,
+   competition, or investor/operator signals.
+6) If report_type is claim_audit, the first search round must verify official status before expanding.
+   Do not generate queries that assume an unverified version name, release, or rumor is true.
 Return JSON:
 {
   "search_queries": [
@@ -164,7 +278,16 @@ Hard requirements:
 1) Include concrete actions, templates, files, tools, or workflows where possible.
 2) Avoid biography-style narration unless it directly supports practical conclusions.
 3) Every key claim must include source anchors like [S1], [S2].
-4) Never use these words: groundbreaking, revolutionary, game-changing, cutting-edge,
+4) Keep the section focused; do not sprawl beyond the requested scope or target length.
+5) For each section, include: key claims, what evidence supports them, and what remains unresolved.
+6) If report_type is claim_audit, distinguish:
+   - verified_facts
+   - rejected_claims
+   - supporting_evidence
+   - counterevidence
+   - unknowns
+   Do not present adjacent true facts as if they prove the original false claim.
+7) Never use these words: groundbreaking, revolutionary, game-changing, cutting-edge,
    paradigm shift, transformative, unprecedented. Use precise, measured language instead.
 
 Tone: academic analyst - precise, evidence-driven, measured. Prefer "X indicates" over "X is amazing."
@@ -196,13 +319,8 @@ Only output valid JSON.
 
 FORMAT_PROMPT = """
 You are a senior editor producing an intelligence-grade research report.
-Format the final report in Markdown with these sections in order:
-1) Latest Viewpoints
-2) Actionable Tactics
-3) Toolchain and Config Templates
-4) Risks & Contrarian Views
-
-Output ONLY the four sections listed above. Do not add any additional sections.
+Format the final report in Markdown using the provided section contract in the exact order supplied.
+Do not invent a new structure and do not rename section headers.
 
 Structural formatting rules:
 - Use bullet point lists for each distinct piece of evidence or claim.
@@ -220,6 +338,8 @@ Content rules:
 - When sources conflict, present both positions explicitly:
   "[S1] asserts X, while [S2] argues Y."
 - If evidence is weak, explicitly write "Evidence insufficient" instead of making generic claims.
+- If report_type is claim_audit, treat the corrected/reframed query as the report objective.
+  Do not reintroduce the original false claim as if it were true.
 - Never use these words: groundbreaking, revolutionary, game-changing, cutting-edge,
   paradigm shift, transformative, unprecedented.
 - Do not output JSON.

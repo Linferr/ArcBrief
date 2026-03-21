@@ -17,14 +17,18 @@ class _JsonlessLLM:
 
 def test_search_plan_fallback_queries_include_recency_and_keyword_anchors():
     node = SearchPlanNode(_JsonlessLLM())
-    plan = node.run("Andrej Karpathy AI workflow", "practical tips", recency_mode="recent_12m_with_90d_anchor")
+    plan = node.run(
+        "Anthropic company business model and moat",
+        "Need current strategic and financial signals.",
+        recency_mode="recent_12m_with_90d_anchor",
+        report_type="company_analysis",
+        evidence_type="primary",
+        target_words=320,
+    )
     queries = [item.get("query", "") for item in plan.get("search_queries", []) if isinstance(item, dict)]
     merged = " ".join(queries)
     assert any("90 days" in q for q in queries)
-    assert "Vibe Coding" in merged
-    assert "Agentic Engineering" in merged
-    assert "RLVR" in merged
-    assert "Claws" in merged
+    assert "official" in merged.lower() or "investor" in merged.lower() or "earnings" in merged.lower()
 
 
 def test_reflection_node_accepts_recency_mode_and_returns_query_pack():
@@ -41,7 +45,7 @@ def test_reflection_node_accepts_recency_mode_and_returns_query_pack():
 
 
 def test_prompts_include_primary_source_priority_language():
-    assert "X/Twitter" in FIRST_SEARCH_PROMPT
+    assert "official statements" in FIRST_SEARCH_PROMPT
     assert "GitHub" in FIRST_SEARCH_PROMPT
     assert "podcasts/interviews" in FIRST_SEARCH_PROMPT
     assert "last 90 days" in recency_instruction("recent_12m_with_90d_anchor")

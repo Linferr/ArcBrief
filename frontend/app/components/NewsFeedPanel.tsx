@@ -790,7 +790,11 @@ export default function NewsFeedPanel({
                       </article>
                     </div>
                   ) : (
-                    <MarkdownViewer content={parsed.fallbackMarkdown || parsed.fallbackText || ''} className="brief-content" />
+                    <MarkdownViewer
+                      content={parsed.fallbackMarkdown || parsed.fallbackText || ''}
+                      variant="brief"
+                      className="brief-content"
+                    />
                   )}
 
                   <div className="keyword-row">
@@ -926,7 +930,11 @@ export default function NewsFeedPanel({
                           </div>
                         </article>
                       ) : (
-                        <MarkdownViewer content={selectedView?.fallbackMarkdown || selectedView?.fallbackText || 'No synthesized summary available yet.'} className="brief-content" />
+                        <MarkdownViewer
+                          content={selectedView?.fallbackMarkdown || selectedView?.fallbackText || 'No synthesized summary available yet.'}
+                          variant="brief"
+                          className="brief-content"
+                        />
                       )}
 
                       {clusterEntries.length > 0 && (

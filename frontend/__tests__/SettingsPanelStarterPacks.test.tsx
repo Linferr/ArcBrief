@@ -71,4 +71,52 @@ describe('SettingsPanel starter packs', () => {
       method: 'POST',
     }));
   });
+
+  it('passes the currently selected language when regenerating briefs', async () => {
+    mockedApiFetch.mockImplementation(async (path: string) => {
+      if (path === '/system/status') {
+        return new Response(JSON.stringify({ started_at: null, scheduler_running: true, active_research: 0, max_concurrent_research: 3, jobs: [] }), { status: 200 });
+      }
+      if (path === '/starter-packs') {
+        return new Response(JSON.stringify([]), { status: 200 });
+      }
+      if (path === '/rss-health') {
+        return new Response(JSON.stringify([]), { status: 200 });
+      }
+      if (path === '/config') {
+        return new Response(JSON.stringify({
+          report_language: 'English (US)',
+          primary_model: 'Qwen3 MAX',
+          search_provider: 'Volcano Engine',
+          strict_academic_mode: false,
+          critical_analysis_layer: false,
+          cognitive_model: 'Neutral (Fact-first)',
+          entity_watchlist: '',
+        }), { status: 200 });
+      }
+      if (path === '/topics/brief_all') {
+        return new Response(JSON.stringify({ date: '2026-03-20', total_topics: 1, results: [], language_used: 'Chinese (Simplified)' }), { status: 200 });
+      }
+      return new Response(null, { status: 404 });
+    });
+
+    render(<SettingsPanel topics={[]} onTopicsChange={vi.fn()} />);
+
+    const languageSelect = await screen.findByLabelText(/report output language/i);
+    fireEvent.change(languageSelect, { target: { value: 'Chinese (Simplified)' } });
+    fireEvent.click(screen.getByRole('button', { name: /regenerate today briefs/i }));
+
+    await waitFor(() => {
+      expect(mockedApiFetch).toHaveBeenCalledWith(
+        '/topics/brief_all',
+        expect.objectContaining({
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ language: 'Chinese (Simplified)' }),
+        }),
+      );
+    });
+
+    expect(await screen.findByText(/today briefs regenerated/i)).toBeInTheDocument();
+  });
 });

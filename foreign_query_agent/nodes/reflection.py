@@ -1,7 +1,7 @@
 """Reflection node."""
 
 from datetime import datetime
-from typing import Dict
+from typing import Dict, List, Optional
 
 from .base import BaseNode
 from ..prompts.prompts import REFLECTION_PROMPT, language_instruction, recency_instruction
@@ -16,8 +16,22 @@ class ReflectionNode(BaseNode):
         latest: str,
         language: str = "English (US)",
         recency_mode: str = "recent_12m_with_90d_anchor",
+        report_type: str = "industry_brief",
+        evidence_type: str = "mixed",
+        target_words: Optional[int] = None,
+        subquestions: Optional[List[str]] = None,
     ) -> Dict[str, object]:
-        payload = f"title: {title}\ncontent: {content}\nlatest: {latest}"
+        payload = str(
+            {
+                "title": title,
+                "content": content,
+                "latest": latest,
+                "report_type": report_type,
+                "evidence_type": evidence_type,
+                "target_words": target_words,
+                "subquestions": subquestions or [],
+            }
+        )
         system_prompt = (
             f"{REFLECTION_PROMPT}\n"
             f"{language_instruction(language)}\n"
@@ -28,8 +42,8 @@ class ReflectionNode(BaseNode):
         default = {
             "search_queries": [
                 {"intent": "latest_gap", "query": f"{title} latest 90 days {current_year}"},
-                {"intent": "source_gap", "query": f"{title} github x thread interview"},
-                {"intent": "actionability_gap", "query": f"{title} workflow template config"},
+                {"intent": "source_gap", "query": f"{title} official source interview filing transcript"},
+                {"intent": "actionability_gap", "query": f"{title} implementation detail workflow template config"},
             ],
             "search_query": f"{title} background",
             "search_tool": "basic_search",

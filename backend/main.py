@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import hmac
 from hashlib import sha256
 import ipaddress
+import inspect
 import logging
 import os
 import re
@@ -612,12 +613,16 @@ class RunRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=500)
     language: Optional[str] = Field(default=None, max_length=64)
     brief_id: Optional[int] = Field(default=None, gt=0)
+    report_type: Optional[str] = Field(default=None, max_length=64)
+    length_preset: Optional[Literal["short", "medium", "long"]] = None
 
 
 class AnalyzeRequest(BaseModel):
     product: str = Field(..., min_length=1, max_length=500)
     language: Optional[str] = Field(default=None, max_length=64)
     brief_id: Optional[int] = Field(default=None, gt=0)
+    report_type: Optional[str] = Field(default=None, max_length=64)
+    length_preset: Optional[Literal["short", "medium", "long"]] = None
 
 
 class BookmarkCreateRequest(BaseModel):
@@ -630,6 +635,8 @@ class RunResponse(BaseModel):
     run_id: str
     status: str
     language_used: str
+    report_type: Optional[str] = None
+    length_preset: Optional[str] = None
 
 
 class StatusResponse(BaseModel):
@@ -639,9 +646,25 @@ class StatusResponse(BaseModel):
     report_path: Optional[str] = None
     report_content: Optional[str] = None
     language_used: Optional[str] = None
+    report_type: Optional[str] = None
+    report_type_requested: Optional[str] = None
+    report_type_effective: Optional[str] = None
+    report_shape: str = "long_analysis"
+    length_preset: str = "long"
+    planning_template: Optional[str] = None
+    premise_status: str = "valid"
+    query_reframed: bool = False
+    original_query: Optional[str] = None
+    effective_query: Optional[str] = None
     delivery_status: str = "full"
     gate_decision: Optional[str] = None
     blocking_issues: List[str] = Field(default_factory=list)
+    word_count: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    estimated_cost_usd: float = 0.0
+    official_source_count: int = 0
+    section_gate_results: List[Dict[str, Any]] = Field(default_factory=list)
     metrics_summary: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -815,6 +838,7 @@ def _build_model_candidates(primary: str) -> List[str]:
     for model in [
         primary,
         os.getenv("FQ_LLM_MODEL", "").strip(),
+        "qwen3-max",
         "gpt-4o-mini",
         "gpt-4.1-mini",
     ]:
@@ -877,7 +901,7 @@ def _build_metrics_summary(
         duration = max(0, int((finished - started).total_seconds()))
 
     effective_provider = provider_effective or provider_from_events
-    return {
+    metrics = {
         "task_completion": record.status == "done",
         "total_duration_sec": duration,
         "step_count": len(record.events),
@@ -886,7 +910,31 @@ def _build_metrics_summary(
         "fallback_triggered": bool(fallback_from_events),
         "provider_effective": effective_provider,
         "provider_fallback_reason": fallback_from_events,
+        "report_type": record.report_type,
+        "report_type_requested": record.report_type_requested,
+        "report_type_effective": record.report_type_effective or record.report_type,
+        "report_shape": record.report_shape,
+        "length_preset": record.length_preset,
+        "quality_mode": record.quality_mode,
+        "planning_template": record.planning_template,
+        "premise_status": record.premise_status,
+        "query_reframed": bool(record.query_reframed),
+        "original_query": record.original_query,
+        "effective_query": record.effective_query,
+        "word_count": record.word_count,
+        "prompt_tokens": record.prompt_tokens,
+        "completion_tokens": record.completion_tokens,
+        "estimated_cost_usd": round(float(record.estimated_cost_usd or 0.0), 6),
+        "primary_source_count": int(record.primary_source_count or 0),
+        "official_source_count": int(record.official_source_count or 0),
+        "request_count": int(record.llm_request_count or 0),
+        "model_requested": record.llm_model_requested,
+        "model_effective": record.llm_model_effective,
+        "section_gate_results": list(record.section_gate_results),
     }
+    if record.prompt_tokens or record.completion_tokens:
+        metrics["total_tokens"] = int(record.prompt_tokens) + int(record.completion_tokens)
+    return metrics
 
 
 def _cleanup_inmemory_runs() -> int:
@@ -1000,21 +1048,117 @@ def _resolve_brief_anchor(brief_id: int) -> tuple[Optional[Dict[str, Any]], Opti
     )
 
 
+def _coerce_float(value: Any) -> float:
+    try:
+        return float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _coerce_int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _aggregate_metrics_bucket(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    count = len(rows)
+    if count == 0:
+        return {"count": 0}
+    total_duration = sum(_coerce_int(row.get("total_duration_sec")) for row in rows)
+    total_cost = sum(_coerce_float(row.get("estimated_cost_usd")) for row in rows)
+    return {
+        "count": count,
+        "avg_duration_sec": round(total_duration / count),
+        "avg_estimated_cost_usd": round(total_cost / count, 6),
+    }
+
+
+def _collect_product_metric_rows(limit: int = 200) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    memory_ids: set[str] = set()
+    for record in RUNS.values():
+        memory_ids.add(record.run_id)
+        summary = dict(record.metrics_summary or {})
+        rows.append(
+            {
+                "run_id": record.run_id,
+                "status": record.status,
+                "delivery_status": record.delivery_status,
+                "gate_decision": record.gate_decision,
+                "started_at": record.started_at,
+                "finished_at": record.finished_at,
+                "report_type": record.report_type or summary.get("report_type"),
+                "report_type_effective": record.report_type_effective or summary.get("report_type_effective"),
+                "provider_effective": summary.get("provider_effective"),
+                "total_duration_sec": summary.get("total_duration_sec"),
+                "estimated_cost_usd": summary.get("estimated_cost_usd"),
+                "primary_source_count": summary.get("primary_source_count"),
+                "premise_status": record.premise_status or summary.get("premise_status"),
+            }
+        )
+    if DB is not None:
+        for row in DB.list_research_runs(limit=limit):
+            if row["run_id"] in memory_ids:
+                continue
+            summary = dict(row.get("metrics_summary") or {})
+            rows.append(
+                {
+                    "run_id": row["run_id"],
+                    "status": row.get("status"),
+                    "delivery_status": row.get("delivery_status"),
+                    "gate_decision": row.get("gate_decision"),
+                    "started_at": row.get("started_at"),
+                    "finished_at": row.get("finished_at"),
+                    "report_type": row.get("report_type") or summary.get("report_type"),
+                    "report_type_effective": summary.get("report_type_effective"),
+                    "provider_effective": summary.get("provider_effective"),
+                    "total_duration_sec": summary.get("total_duration_sec"),
+                    "estimated_cost_usd": summary.get("estimated_cost_usd"),
+                    "primary_source_count": summary.get("primary_source_count"),
+                    "premise_status": summary.get("premise_status"),
+                }
+            )
+    return rows
+
+
 def _run_job(
     run_id: str,
     query: str,
     language: str,
     run_type: str = "research",
     brief_id: Optional[int] = None,
+    report_type: Optional[str] = None,
+    length_preset: Optional[str] = None,
 ) -> None:
     record = RUNS[run_id]
     record.status = "running"
     record.started_at = datetime.utcnow().isoformat()
     record.language_used = _normalize_language(language)
     record.run_type = run_type
+    record.report_type = report_type or record.report_type
+    record.length_preset = (length_preset or record.length_preset or "long")
+    record.quality_mode = "quality_first"
     record.delivery_status = "full"
     record.gate_decision = None
     record.blocking_issues = []
+    record.premise_status = "valid"
+    record.query_reframed = False
+    record.original_query = query
+    record.effective_query = query
+    record.report_type_requested = report_type or record.report_type
+    record.report_type_effective = report_type or record.report_type
+    record.word_count = 0
+    record.prompt_tokens = 0
+    record.completion_tokens = 0
+    record.estimated_cost_usd = 0.0
+    record.primary_source_count = 0
+    record.official_source_count = 0
+    record.llm_request_count = 0
+    record.llm_model_requested = None
+    record.llm_model_effective = None
+    record.section_gate_results = []
     record.metrics_summary = {}
 
     try:
@@ -1141,11 +1285,17 @@ def _run_job(
                     record.events.append(RunEvent(stage="warning", message=anchor_warning))
             safe_query = _sanitize_query(raw_query)
             try:
-                report = agent.research(
-                    safe_query,
-                    progress_cb=progress_cb,
-                    language=record.language_used,
-                )
+                research_kwargs = {
+                    "progress_cb": progress_cb,
+                    "language": record.language_used,
+                    "report_type": record.report_type,
+                    "length_preset": record.length_preset,
+                }
+                signature = inspect.signature(agent.research)
+                accepted_kwargs = {
+                    key: value for key, value in research_kwargs.items() if key in signature.parameters
+                }
+                report = agent.research(safe_query, **accepted_kwargs)
                 final_meta = getattr(agent, "search_meta", None)
                 if final_meta is not None:
                     provider_effective = final_meta.provider_effective
@@ -1157,8 +1307,78 @@ def _run_job(
                     record.gate_decision = str(gate_decision) if gate_decision not in (None, "") else None
                     raw_issues = getattr(agent_state, "blocking_issues", []) or []
                     record.blocking_issues = [str(item).strip() for item in raw_issues if str(item).strip()]
+                    record.report_type = str(
+                        getattr(agent_state, "report_type", None)
+                        or getattr(agent_state, "planning_template", None)
+                        or record.report_type
+                        or ""
+                    ).strip() or None
+                    record.report_type_requested = str(
+                        getattr(agent_state, "report_type_requested", None)
+                        or getattr(getattr(agent_state, "spec", None), "report_type_requested", None)
+                        or record.report_type_requested
+                        or ""
+                    ).strip() or None
+                    record.report_type_effective = str(
+                        getattr(agent_state, "report_type_effective", None)
+                        or getattr(getattr(agent_state, "spec", None), "report_type_effective", None)
+                        or record.report_type
+                        or ""
+                    ).strip() or None
+                    record.report_shape = str(getattr(agent_state, "report_shape", record.report_shape) or "long_analysis")
+                    record.length_preset = str(getattr(agent_state, "length_preset", record.length_preset) or "long")
+                    record.quality_mode = str(getattr(agent_state, "quality_mode", record.quality_mode) or "quality_first")
+                    record.planning_template = str(
+                        getattr(agent_state, "planning_template", None) or record.planning_template or ""
+                    ).strip() or None
+                    state_spec = getattr(agent_state, "spec", None)
+                    record.premise_status = str(
+                        getattr(state_spec, "premise_status", None)
+                        or getattr(agent_state, "premise_status", None)
+                        or record.premise_status
+                        or "valid"
+                    ).strip() or "valid"
+                    record.original_query = str(
+                        getattr(state_spec, "original_query", None)
+                        or record.original_query
+                        or query
+                    ).strip() or query
+                    record.effective_query = str(
+                        getattr(state_spec, "effective_query", None)
+                        or record.effective_query
+                        or query
+                    ).strip() or query
+                    record.query_reframed = record.original_query != record.effective_query
+                    final_report_text = str(getattr(agent_state, "final_report", "") or "")
+                    if final_report_text:
+                        record.word_count = len(re.findall(r"\S+", final_report_text))
+                    assessments = getattr(agent_state, "section_assessments", []) or []
+                    normalized_assessments: List[Dict[str, Any]] = []
+                    for item in assessments:
+                        if isinstance(item, dict):
+                            normalized_assessments.append(dict(item))
+                        elif hasattr(item, "to_dict"):
+                            normalized_assessments.append(item.to_dict())
+                    record.section_gate_results = normalized_assessments
+                    if not record.section_gate_results:
+                        record.section_gate_results = []
+                    global_source_map = getattr(agent_state, "global_source_map", {}) or {}
+                    record.primary_source_count = sum(
+                        1 for info in global_source_map.values() if str(info.get("source_type") or "") == "primary"
+                    )
+                    record.official_source_count = record.primary_source_count
+                llm_usage_summary = getattr(agent, "llm_usage_summary", None)
+                if callable(llm_usage_summary):
+                    usage = llm_usage_summary() or {}
+                    record.prompt_tokens = int(usage.get("prompt_tokens", 0) or 0)
+                    record.completion_tokens = int(usage.get("completion_tokens", 0) or 0)
+                    record.estimated_cost_usd = float(usage.get("estimated_cost_usd", 0.0) or 0.0)
+                    record.llm_model_requested = str(usage.get("model_requested") or "") or None
+                    record.llm_model_effective = str(usage.get("model_effective") or "") or None
+                    record.llm_request_count = int(usage.get("request_count", 0) or 0)
                 if run_type == "analyze":
                     report = _rewrite_analysis_report(report, query, record.language_used)
+                    record.word_count = len(re.findall(r"\S+", report or ""))
                 path = agent.save_report(report, settings.output_dir)
                 if idx > 0:
                     record.events.append(
@@ -1518,15 +1738,28 @@ def start_run(payload: RunRequest):
         with _research_lock:
             _active_research -= 1
         raise HTTPException(status_code=400, detail="Run already exists")
-    record = RunRecord(run_id=run_id, query=payload.query, run_type="research", language_used=language_used)
+    record = RunRecord(
+        run_id=run_id,
+        query=payload.query,
+        run_type="research",
+        language_used=language_used,
+        report_type=payload.report_type,
+        length_preset=payload.length_preset or "long",
+    )
     RUNS[run_id] = record
     thread = threading.Thread(
         target=_run_job,
-        args=(run_id, payload.query, language_used, "research", payload.brief_id),
+        args=(run_id, payload.query, language_used, "research", payload.brief_id, payload.report_type, payload.length_preset),
         daemon=True,
     )
     thread.start()
-    return RunResponse(run_id=run_id, status="running", language_used=language_used)
+    return RunResponse(
+        run_id=run_id,
+        status="running",
+        language_used=language_used,
+        report_type=payload.report_type,
+        length_preset=payload.length_preset or "long",
+    )
 
 
 @app.post("/api/analyze", response_model=RunResponse)
@@ -1546,15 +1779,28 @@ def start_analysis(payload: AnalyzeRequest):
         with _research_lock:
             _active_research -= 1
         raise HTTPException(status_code=400, detail="Run already exists")
-    record = RunRecord(run_id=run_id, query=payload.product, run_type="analyze", language_used=language_used)
+    record = RunRecord(
+        run_id=run_id,
+        query=payload.product,
+        run_type="analyze",
+        language_used=language_used,
+        report_type=payload.report_type,
+        length_preset=payload.length_preset or "long",
+    )
     RUNS[run_id] = record
     thread = threading.Thread(
         target=_run_job,
-        args=(run_id, payload.product, language_used, "analyze", payload.brief_id),
+        args=(run_id, payload.product, language_used, "analyze", payload.brief_id, payload.report_type, payload.length_preset),
         daemon=True,
     )
     thread.start()
-    return RunResponse(run_id=run_id, status="running", language_used=language_used)
+    return RunResponse(
+        run_id=run_id,
+        status="running",
+        language_used=language_used,
+        report_type=payload.report_type,
+        length_preset=payload.length_preset or "long",
+    )
 
 
 @app.get("/api/status/{run_id}", response_model=StatusResponse)
@@ -1568,9 +1814,25 @@ def get_status(run_id: str):
             report_path=record.report_path,
             report_content=record.report_content,
             language_used=record.language_used,
+            report_type=record.report_type,
+            report_type_requested=record.report_type_requested,
+            report_type_effective=record.report_type_effective,
+            report_shape=record.report_shape,
+            length_preset=record.length_preset,
+            planning_template=record.planning_template,
+            premise_status=record.premise_status,
+            query_reframed=record.query_reframed,
+            original_query=record.original_query,
+            effective_query=record.effective_query,
             delivery_status=record.delivery_status,
             gate_decision=record.gate_decision,
             blocking_issues=list(record.blocking_issues),
+            word_count=record.word_count,
+            prompt_tokens=record.prompt_tokens,
+            completion_tokens=record.completion_tokens,
+            estimated_cost_usd=record.estimated_cost_usd,
+            official_source_count=int(record.official_source_count or (record.metrics_summary or {}).get("official_source_count") or 0),
+            section_gate_results=list(record.section_gate_results),
             metrics_summary=dict(record.metrics_summary),
         )
     if DB is not None:
@@ -1583,9 +1845,25 @@ def get_status(run_id: str):
                 report_path=row.get("report_path"),
                 report_content=row.get("report_content"),
                 language_used=row.get("language_used"),
+                report_type=row.get("report_type") or row.get("metrics_summary", {}).get("report_type"),
+                report_type_requested=(row.get("metrics_summary") or {}).get("report_type_requested"),
+                report_type_effective=(row.get("metrics_summary") or {}).get("report_type_effective"),
+                report_shape=str((row.get("metrics_summary") or {}).get("report_shape") or "long_analysis"),
+                length_preset=str((row.get("metrics_summary") or {}).get("length_preset") or "long"),
+                planning_template=(row.get("metrics_summary") or {}).get("planning_template"),
+                premise_status=str((row.get("metrics_summary") or {}).get("premise_status") or "valid"),
+                query_reframed=bool((row.get("metrics_summary") or {}).get("query_reframed")),
+                original_query=(row.get("metrics_summary") or {}).get("original_query"),
+                effective_query=(row.get("metrics_summary") or {}).get("effective_query"),
                 delivery_status=str(row.get("delivery_status") or "full"),
                 gate_decision=row.get("gate_decision"),
                 blocking_issues=list(row.get("blocking_issues") or []),
+                word_count=int((row.get("metrics_summary") or {}).get("word_count") or 0),
+                prompt_tokens=int((row.get("metrics_summary") or {}).get("prompt_tokens") or 0),
+                completion_tokens=int((row.get("metrics_summary") or {}).get("completion_tokens") or 0),
+                estimated_cost_usd=float((row.get("metrics_summary") or {}).get("estimated_cost_usd") or 0.0),
+                official_source_count=int((row.get("metrics_summary") or {}).get("official_source_count") or 0),
+                section_gate_results=list((row.get("metrics_summary") or {}).get("section_gate_results") or []),
                 metrics_summary=dict(row.get("metrics_summary") or {}),
             )
     raise HTTPException(status_code=404, detail="Run not found")
@@ -1605,6 +1883,16 @@ def get_history(page: int = 1, size: int = 10, status: Optional[str] = None, q: 
             "query": r.query,
             "status": r.status,
             "language_used": r.language_used,
+            "report_type": r.report_type,
+            "report_type_requested": r.report_type_requested,
+            "report_type_effective": r.report_type_effective,
+            "report_shape": r.report_shape,
+            "length_preset": r.length_preset,
+            "planning_template": r.planning_template,
+            "premise_status": r.premise_status,
+            "query_reframed": r.query_reframed,
+            "original_query": r.original_query,
+            "effective_query": r.effective_query,
             "started_at": r.started_at,
             "finished_at": r.finished_at,
             "created_at": r.started_at or r.finished_at,
@@ -1612,6 +1900,12 @@ def get_history(page: int = 1, size: int = 10, status: Optional[str] = None, q: 
             "delivery_status": r.delivery_status,
             "gate_decision": r.gate_decision,
             "blocking_issues": list(r.blocking_issues),
+            "word_count": r.word_count,
+            "prompt_tokens": r.prompt_tokens,
+            "completion_tokens": r.completion_tokens,
+            "estimated_cost_usd": r.estimated_cost_usd,
+            "official_source_count": int(r.official_source_count or (r.metrics_summary or {}).get("official_source_count") or 0),
+            "section_gate_results": list(r.section_gate_results),
             "metrics_summary": dict(r.metrics_summary),
             "source_count": _estimate_source_count(r.report_content),
         })
@@ -1623,6 +1917,22 @@ def get_history(page: int = 1, size: int = 10, status: Optional[str] = None, q: 
                 row["delivery_status"] = str(row.get("delivery_status") or "full")
                 row["blocking_issues"] = list(row.get("blocking_issues") or [])
                 row["metrics_summary"] = dict(row.get("metrics_summary") or {})
+                row["report_type"] = row.get("report_type") or row["metrics_summary"].get("report_type")
+                row["report_type_requested"] = row["metrics_summary"].get("report_type_requested")
+                row["report_type_effective"] = row["metrics_summary"].get("report_type_effective")
+                row["report_shape"] = row["metrics_summary"].get("report_shape", "long_analysis")
+                row["length_preset"] = row["metrics_summary"].get("length_preset", "long")
+                row["planning_template"] = row["metrics_summary"].get("planning_template")
+                row["premise_status"] = str(row["metrics_summary"].get("premise_status") or "valid")
+                row["query_reframed"] = bool(row["metrics_summary"].get("query_reframed"))
+                row["original_query"] = row["metrics_summary"].get("original_query")
+                row["effective_query"] = row["metrics_summary"].get("effective_query")
+                row["word_count"] = int(row["metrics_summary"].get("word_count") or 0)
+                row["prompt_tokens"] = int(row["metrics_summary"].get("prompt_tokens") or 0)
+                row["completion_tokens"] = int(row["metrics_summary"].get("completion_tokens") or 0)
+                row["estimated_cost_usd"] = float(row["metrics_summary"].get("estimated_cost_usd") or 0.0)
+                row["official_source_count"] = int(row["metrics_summary"].get("official_source_count") or 0)
+                row["section_gate_results"] = list(row["metrics_summary"].get("section_gate_results") or [])
                 results.append(row)
     # Filter
     if status:
@@ -1635,6 +1945,69 @@ def get_history(page: int = 1, size: int = 10, status: Optional[str] = None, q: 
     start = (page - 1) * size
     page_results = results[start:start + size]
     return {"total": total, "page": page, "size": size, "results": page_results}
+
+
+@app.get("/api/product/metrics")
+def get_product_metrics(days: int = 7):
+    window_days = max(1, min(days, 365))
+    cutoff = datetime.utcnow() - timedelta(days=window_days)
+    rows = []
+    for row in _collect_product_metric_rows(limit=500):
+        anchor = _parse_iso(str(row.get("finished_at") or row.get("started_at") or ""))
+        if anchor is None or anchor >= cutoff:
+            rows.append(row)
+
+    total_runs = len(rows)
+    if total_runs == 0:
+        return {
+            "days": window_days,
+            "total_runs": 0,
+            "task_completion_rate": 0.0,
+            "gate_pass_rate": 0.0,
+            "limited_delivery_rate": 0.0,
+            "avg_duration_sec": 0,
+            "avg_cost_per_run": 0.0,
+            "total_estimated_cost_usd": 0.0,
+            "primary_source_coverage_rate": 0.0,
+            "premise_invalid_rate": 0.0,
+            "by_report_type": {},
+            "by_provider": {},
+        }
+
+    completed = [row for row in rows if str(row.get("status") or "") == "done"]
+    gate_pass = [row for row in rows if str(row.get("gate_decision") or "") == "PASS"]
+    limited = [row for row in rows if str(row.get("delivery_status") or "") == "limited"]
+    with_primary = [row for row in rows if _coerce_int(row.get("primary_source_count")) > 0]
+    premise_invalid = [row for row in rows if str(row.get("premise_status") or "") == "invalid"]
+    total_duration = sum(_coerce_int(row.get("total_duration_sec")) for row in rows)
+    total_cost = sum(_coerce_float(row.get("estimated_cost_usd")) for row in rows)
+
+    by_report_type: Dict[str, List[Dict[str, Any]]] = {}
+    by_provider: Dict[str, List[Dict[str, Any]]] = {}
+    for row in rows:
+        report_type = str(row.get("report_type_effective") or row.get("report_type") or "unknown")
+        provider = str(row.get("provider_effective") or "unknown")
+        by_report_type.setdefault(report_type, []).append(row)
+        by_provider.setdefault(provider, []).append(row)
+
+    return {
+        "days": window_days,
+        "total_runs": total_runs,
+        "task_completion_rate": len(completed) / total_runs,
+        "gate_pass_rate": len(gate_pass) / total_runs,
+        "limited_delivery_rate": len(limited) / total_runs,
+        "avg_duration_sec": round(total_duration / total_runs),
+        "avg_cost_per_run": round(total_cost / total_runs, 6),
+        "total_estimated_cost_usd": round(total_cost, 6),
+        "primary_source_coverage_rate": len(with_primary) / total_runs,
+        "premise_invalid_rate": len(premise_invalid) / total_runs,
+        "by_report_type": {
+            key: _aggregate_metrics_bucket(value) for key, value in sorted(by_report_type.items())
+        },
+        "by_provider": {
+            key: _aggregate_metrics_bucket(value) for key, value in sorted(by_provider.items())
+        },
+    }
 
 
 @app.get("/api/report/{run_id}")

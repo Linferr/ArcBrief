@@ -49,3 +49,18 @@ def test_append_sources_uses_global_source_map_once():
     assert final.count("## Sources") == 1
     assert "- [S1] A -- https://a.test" in final
     assert "- [S2] B -- https://b.test" in final
+
+
+def test_append_sources_skips_provider_placeholder_titles():
+    report = "# Report\n\n## Strategic Context\nBody [S1] [S2]"
+    final = QueryAgent._append_sources_from_map(
+        report,
+        {
+            "S1": {"title": "Volcano Engine result for company analysis", "url": "https://example.com/provider"},
+            "S2": {"title": "Official filing", "url": "https://sec.gov/filing", "source_type": "primary"},
+        },
+        "English (US)",
+    )
+
+    assert "Volcano Engine result for company analysis" not in final
+    assert "- [S2] [primary] Official filing -- https://sec.gov/filing" in final

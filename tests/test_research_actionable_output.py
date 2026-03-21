@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from foreign_query_agent.nodes.formatting import FormattingNode
 from foreign_query_agent.nodes.summary import SummaryNode
+from foreign_query_agent.state import SectionPlan
 
 
 class _PlainLLM:
@@ -19,14 +20,24 @@ class _EmptyJsonLLM:
         return "{}"
 
 
-def test_formatting_enforces_required_sections():
+def test_formatting_uses_planned_sections_instead_of_fixed_defaults():
     node = FormattingNode(_PlainLLM())
-    report = node.run([{"title": "t", "content": "c"}], language="English (US)")
-    assert "## Latest Viewpoints" in report
-    assert "## Actionable Tactics" in report
-    assert "## Toolchain and Config Templates" in report
-    assert "## Risks & Contrarian Views" in report
-    # Sources is NOT in _required_sections — it is appended by agent._append_sources()
+    plans = [
+        SectionPlan(title="Strategic Context", content="Why it matters now.", evidence_type="market", target_words=260),
+        SectionPlan(title="Competitive Position", content="How the company is positioned.", evidence_type="primary", target_words=300),
+        SectionPlan(title="Execution Risks", content="Where the thesis may break.", evidence_type="contrarian", target_words=240),
+    ]
+    report = node.run(
+        [{"title": "t", "content": "c"}],
+        language="English (US)",
+        section_plans=plans,
+        report_shape="long_analysis",
+        report_type="company_analysis",
+    )
+    assert "## Strategic Context" in report
+    assert "## Competitive Position" in report
+    assert "## Execution Risks" in report
+    assert "## Latest Viewpoints" not in report
     assert "## Sources" not in report
 
 

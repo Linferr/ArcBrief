@@ -32,7 +32,7 @@ _load_env_file(_PROJECT_ROOT / ".env")
 class Settings:
     llm_api_key: str = os.getenv("FQ_LLM_API_KEY", "")
     llm_base_url: str = os.getenv("FQ_LLM_BASE_URL", "")
-    llm_model: str = os.getenv("FQ_LLM_MODEL", "gpt-4o-mini")
+    llm_model: str = os.getenv("FQ_LLM_MODEL", "qwen3-max")
 
     search_provider: str = os.getenv("ARCBRIEF_SEARCH_PROVIDER", "Volcano Engine")
     research_strict_provider: bool = os.getenv("ARCBRIEF_RESEARCH_STRICT_PROVIDER", "1") == "1"

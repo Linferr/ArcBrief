@@ -44,6 +44,7 @@ class CanonicalQueryCase:
 class ReportSignals:
     section_titles: List[str]
     section_count: int
+    word_count: int
     source_count: int
     primary_source_count: int
     has_sources_section: bool
@@ -136,6 +137,7 @@ def extract_report_signals(report_content: str) -> ReportSignals:
     return ReportSignals(
         section_titles=section_titles,
         section_count=len(section_titles),
+        word_count=len(re.findall(r"\S+", report_content or "")),
         source_count=_estimate_source_count(report_content or ""),
         primary_source_count=_count_primary_sources(urls),
         has_sources_section=any("sources" == title.strip().lower() for title in section_titles),

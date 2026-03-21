@@ -39,6 +39,7 @@ def test_build_baseline_manifest_from_output_dir(tmp_path):
     anthropic = next(item for item in manifest["cases"] if item["key"] == "anthropic_recent")
     assert anthropic["expectations"]["min_section_count"] >= 1
     assert anthropic["expectations"]["min_source_count"] == 1
+    assert anthropic["expectations"]["min_word_count"] >= 50
 
 
 def test_evaluate_baseline_manifest_passes_when_current_matches(tmp_path):
@@ -52,6 +53,7 @@ def test_evaluate_baseline_manifest_passes_when_current_matches(tmp_path):
     report = evaluate_baseline_manifest(manifest, output_dir)
     assert report["passed"] is True
     assert all(item["passed"] for item in report["results"])
+    assert all("rubric" in item for item in report["results"])
 
 
 def test_evaluate_baseline_manifest_detects_regression(tmp_path):

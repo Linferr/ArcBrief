@@ -322,7 +322,13 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
     setRegenRunning(true);
     setNotice('');
     try {
-      const res = await apiFetch('/topics/brief_all', { method: 'POST' });
+      const language = appConfig?.report_language;
+      const body = language ? JSON.stringify({ language }) : undefined;
+      const res = await apiFetch('/topics/brief_all', {
+        method: 'POST',
+        headers: body ? { 'Content-Type': 'application/json' } : undefined,
+        body,
+      });
       if (!res.ok) {
         setNotice('Failed to regenerate today briefs.');
         setRegenRunning(false);

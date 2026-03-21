@@ -1,61 +1,62 @@
 """Formatting node."""
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from .base import BaseNode
 from ..prompts.prompts import FORMAT_PROMPT, language_instruction
+from ..state import SectionPlan
 
 
-def _required_sections(language: str) -> List[str]:
-    """Sections that _ensure_sections will force-add if missing.
-
-    NOTE: "Sources" is intentionally excluded — it is appended by
-    agent._append_sources_from_map() which builds the real source list
-    from the global source map.  Including it here would create a
-    duplicate "## Sources" block.
-    """
-    if language == "Chinese (Simplified)":
-        return ["最新观点", "实操技巧", "工具链与配置模板", "风险与反共识观点"]
-    if language == "Japanese":
-        return ["最新の見解", "実践テクニック", "ツールチェーンと設定テンプレート", "リスクと反論"]
-    return [
-        "Latest Viewpoints",
-        "Actionable Tactics",
-        "Toolchain and Config Templates",
-        "Risks & Contrarian Views",
-    ]
+def _normalize_section_plans(section_plans: Optional[List[SectionPlan | Dict[str, object]]]) -> List[Dict[str, object]]:
+    normalized: List[Dict[str, object]] = []
+    for item in section_plans or []:
+        if isinstance(item, SectionPlan):
+            normalized.append(item.to_dict())
+        elif isinstance(item, dict) and item.get("title"):
+            normalized.append(dict(item))
+    return normalized
 
 
-def _ensure_sections(report: str, language: str) -> str:
-    """Ensure the report contains all required sections.
-
-    Uses two guards to avoid duplicate sections:
-    1. If 4+ ``## `` headers already exist, do not append any.
-    2. Fuzzy containment check: a required section is considered present
-       if its name (lowered) appears anywhere within an existing ``## `` line.
-    """
+def _ensure_planned_sections(
+    report: str,
+    section_plans: List[Dict[str, object]],
+    report_shape: str,
+) -> str:
     text = (report or "").strip()
     if not text.startswith("#"):
-        text = "# Report\n\n" + text
+        heading = "# Long-Form Analysis" if report_shape == "long_analysis" else "# Report"
+        text = f"{heading}\n\n{text}".strip()
 
-    existing_h2 = [
-        line.strip() for line in text.split("\n") if line.strip().startswith("## ")
-    ]
+    existing_h2 = [line.strip() for line in text.splitlines() if line.strip().startswith("## ")]
+    if len(existing_h2) >= len(section_plans) and section_plans:
+        return text
 
-    if len(existing_h2) >= 4:
-        return text.strip()
-
-    required = _required_sections(language)
-    for section in required:
-        found = any(section.lower() in h2.lower() for h2 in existing_h2)
+    for section in section_plans:
+        title = str(section.get("title") or "").strip()
+        if not title:
+            continue
+        found = any(title.lower() in header.lower() for header in existing_h2)
         if not found:
-            text += f"\n\n## {section}\n- Evidence insufficient."
+            text += "\n\n" + f"## {title}\n- Evidence insufficient."
     return text.strip()
 
 
 class FormattingNode(BaseNode):
-    def run(self, paragraphs: List[Dict[str, str]], language: str = "English (US)") -> str:
-        payload = "\n".join([f"## {p['title']}\n{p['content']}" for p in paragraphs])
+    def run(
+        self,
+        paragraphs: List[Dict[str, str]],
+        language: str = "English (US)",
+        section_plans: Optional[List[SectionPlan | Dict[str, object]]] = None,
+        report_shape: str = "long_analysis",
+        report_type: str = "industry_brief",
+    ) -> str:
+        normalized_plans = _normalize_section_plans(section_plans)
+        payload = {
+            "report_type": report_type,
+            "report_shape": report_shape,
+            "section_contract": normalized_plans,
+            "sections": paragraphs,
+        }
         system_prompt = f"{FORMAT_PROMPT}\n{language_instruction(language)}"
-        raw = self.llm.invoke(system_prompt, payload)
-        return _ensure_sections(raw, language)
+        raw = self.llm.invoke(system_prompt, str(payload))
+        return _ensure_planned_sections(raw, normalized_plans, report_shape)

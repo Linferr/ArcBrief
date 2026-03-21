@@ -1,8 +1,8 @@
 """State models for the query agent."""
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 
 def _coerce_string_list(value: Any) -> List[str]:
@@ -27,6 +27,79 @@ class SearchItem:
     url: str
     content: str
     timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
+
+
+@dataclass
+class ResearchSpec:
+    query: str
+    brief_id: Optional[int] = None
+    language: str = "English (US)"
+    report_shape: str = "long_analysis"
+    report_type: str = "industry_brief"
+    report_type_requested: str = "industry_brief"
+    report_type_effective: str = "industry_brief"
+    length_preset: str = "long"
+    quality_mode: str = "quality_first"
+    original_query: str = ""
+    effective_query: str = ""
+    premise_status: str = "valid"
+    validation_notes: str = ""
+    official_queries: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class PremiseCheckResult:
+    premise_status: str = "valid"
+    reframed_query: str = ""
+    recommended_report_type: str = ""
+    validation_notes: str = ""
+    official_queries: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class SectionPlan:
+    title: str
+    content: str
+    evidence_type: str = "mixed"
+    target_words: int = 260
+    pass_criteria: str = ""
+    subquestions: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class EvidenceItem:
+    source_id: str
+    title: str
+    url: str
+    content: str = ""
+    source_type: str = "unknown"
+    host: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class SectionAssessment:
+    title: str
+    gate_decision: str = "REVISE"
+    overall_score: int = 2
+    blocking_issues: List[str] = field(default_factory=list)
+    source_count: int = 0
+    primary_source_count: int = 0
+    unsupported_claims: int = 0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
 
 
 @dataclass
@@ -91,22 +164,34 @@ class CriticResult:
 class ParagraphState:
     title: str
     content: str
+    plan: Optional[SectionPlan] = None
     latest_summary: str = ""
     search_history: List[SearchItem] = field(default_factory=list)
     source_map: Dict[str, Dict[str, str]] = field(default_factory=dict)
+    evidence_items: List[EvidenceItem] = field(default_factory=list)
     reflection_count: int = 0
     host_critiques: List[Dict[str, str]] = field(default_factory=list)
     fallback_reason: str = ""
+    assessment: Optional[SectionAssessment] = None
 
 
 @dataclass
 class ReportState:
     query: str
+    spec: Optional[ResearchSpec] = None
     paragraphs: List[ParagraphState] = field(default_factory=list)
+    section_plans: List[SectionPlan] = field(default_factory=list)
+    section_assessments: List[Dict[str, Any]] = field(default_factory=list)
     global_source_map: Dict[str, Dict[str, str]] = field(default_factory=dict)
     next_source_index: int = 1
     final_report: str = ""
     planning_template: str = "industry_brief"
+    report_type: str = "industry_brief"
+    report_type_requested: str = "industry_brief"
+    report_type_effective: str = "industry_brief"
+    report_shape: str = "long_analysis"
+    length_preset: str = "long"
+    quality_mode: str = "quality_first"
     delivery_status: str = "full"
     gate_decision: str = "PASS"
     blocking_issues: List[str] = field(default_factory=list)

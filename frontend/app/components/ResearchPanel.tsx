@@ -154,10 +154,6 @@ export default function ResearchPanel({
   const [isReportOpen, setIsReportOpen] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
   const [notice, setNotice] = useState('');
-  const [previewRunId, setPreviewRunId] = useState<string | null>(null);
-  const [previewTitle, setPreviewTitle] = useState('');
-  const [previewReport, setPreviewReport] = useState('');
-  const [previewLoading, setPreviewLoading] = useState(false);
   const [runLanguage, setRunLanguage] = useState<UILanguage>('English (US)');
 
   useEffect(() => {
@@ -287,28 +283,6 @@ export default function ResearchPanel({
     setReportLoading(false);
   };
 
-  const previewFromHistory = async (run: RunSummary) => {
-    setPreviewRunId(run.run_id);
-    setPreviewTitle(run.query);
-    setPreviewLoading(true);
-    setPreviewReport('');
-    try {
-      const res = await apiFetch(`/report/${run.run_id}`);
-      if (res.ok) setPreviewReport(await res.text());
-      else setPreviewReport(await readErrorMessage(res, 'Report not found.'));
-    } catch {
-      setPreviewReport('Report load failed.');
-    }
-    setPreviewLoading(false);
-  };
-
-  const clearPreview = () => {
-    setPreviewRunId(null);
-    setPreviewTitle('');
-    setPreviewReport('');
-    setPreviewLoading(false);
-  };
-
   const closeReport = () => {
     setIsReportOpen(false);
     setSelectedRun(null);
@@ -375,17 +349,13 @@ export default function ResearchPanel({
     .filter((e) => ['search', 'summary', 'host', 'reflection'].includes(e.stage))
     .slice(-ITERATIVE_LOG_LIMIT);
 
-  const activePreview = previewRunId ? previewReport : report;
-  const previewQuery = (previewRunId ? previewTitle : query).trim();
+  const activePreview = report;
+  const previewQuery = query.trim();
   const copy = PIPELINE_COPY['English (US)'];
   const visibleHistory = recentExpanded ? history : history.slice(0, RECENT_COLLAPSED_COUNT);
   const hasMoreHistory = recentExpanded && history.length < historyTotal;
-  const previewTarget = useMemo(
-    () => history.find((h) => h.run_id === previewRunId) || null,
-    [history, previewRunId]
-  );
   const currentRunTarget = runId ? { run_id: runId, query: query || 'Research query', status } : null;
-  const reportTarget = previewTarget || currentRunTarget;
+  const reportTarget = currentRunTarget;
 
   const loadMoreHistory = () => {
     if (history.length >= historyTotal) return;
@@ -482,26 +452,20 @@ export default function ResearchPanel({
                     Export PDF
                   </button>
                 )}
-                {previewRunId && (
-                  <button className="ghost" onClick={clearPreview}>
-                    Clear
-                  </button>
-                )}
               </div>
             </div>
 
-            {previewLoading && <div className="muted">Loading preview...</div>}
-            {!previewLoading && activePreview ? (
+            {activePreview ? (
               <div className="report-paper deep-paper">
                 <div className="report-paper-head ui-font">
                   <span style={{ fontFamily: 'var(--font-serif)', fontSize: '14px', fontWeight: 'bold', color: 'var(--text-primary)' }}>{previewQuery || 'Research query'}</span>
                   <span>{new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
                 </div>
                 <div className="report-preview-md"><MarkdownViewer content={activePreview} /></div>
-                <div className="report-watermark mono">REF: {previewRunId || runId || 'N/A'}</div>
+                <div className="report-watermark mono">REF: {runId || 'N/A'}</div>
               </div>
             ) : (
-              !previewLoading && <div className="muted" style={{ padding: '24px', background: 'var(--bg-sidebar)', border: '1px solid var(--border-color)', borderRadius: '4px' }}>No report yet.</div>
+              <div className="muted" style={{ padding: '24px', background: 'var(--bg-sidebar)', border: '1px solid var(--border-color)', borderRadius: '4px' }}>No report yet.</div>
             )}
           </div>
         </div>
@@ -519,8 +483,8 @@ export default function ResearchPanel({
                 <button
                   type="button"
                   key={h.run_id}
-                  className={`source-item brief-history-item recent-run-item ${previewRunId === h.run_id ? 'active' : ''}`}
-                  onClick={() => previewFromHistory(h)}
+                  className={`source-item brief-history-item recent-run-item ${selectedRun?.run_id === h.run_id && isReportOpen ? 'active' : ''}`}
+                  onClick={() => openReport(h)}
                 >
                   <div className="recent-run-main">
                     <div className="recent-run-title" style={{ fontFamily: 'var(--font-serif)' }}>{h.query}</div>
@@ -546,8 +510,14 @@ export default function ResearchPanel({
       </div>
 
       {isReportOpen && (
-        <div className="report-modal">
-          <div className="report-modal-content">
+        <div className="report-modal" role="presentation" onClick={closeReport}>
+          <div
+            className="report-modal-content"
+            role="dialog"
+            aria-modal="true"
+            aria-label={selectedRun?.query || 'Full report'}
+            onClick={(event) => event.stopPropagation()}
+          >
             <div className="report-modal-header">
               <div>
                 <div className="eyebrow">Full Report</div>

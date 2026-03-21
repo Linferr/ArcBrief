@@ -7,6 +7,16 @@ import remarkGfm from 'remark-gfm';
 interface MarkdownViewerProps {
   content: string;
   className?: string;
+  variant?: 'default' | 'brief';
+}
+
+export function normalizeMarkdownForVariant(
+  content: string,
+  variant: MarkdownViewerProps['variant'] = 'default',
+): string {
+  const normalized = (content || '').replace(/\r\n/g, '\n');
+  if (variant !== 'brief') return normalized;
+  return normalized.replace(/\n{4,}/g, '\n\n\n').trim();
 }
 
 const CONFIDENCE_LEVELS: Record<string, { label: string; className: string }> = {
@@ -83,11 +93,17 @@ const components: Components = {
   },
 };
 
-export default function MarkdownViewer({ content, className }: MarkdownViewerProps) {
+export default function MarkdownViewer({
+  content,
+  className,
+  variant = 'default',
+}: MarkdownViewerProps) {
+  const normalizedContent = normalizeMarkdownForVariant(content, variant);
+  const variantClass = variant === 'brief' ? 'md-viewer-brief' : '';
   return (
-    <div className={`md-viewer ${className ?? ''}`}>
+    <div className={`md-viewer ${variantClass} ${className ?? ''}`.trim()}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
-        {content}
+        {normalizedContent}
       </ReactMarkdown>
     </div>
   );

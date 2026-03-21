@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import MarkdownViewer from '../app/components/MarkdownViewer';
+import MarkdownViewer, { normalizeMarkdownForVariant } from '../app/components/MarkdownViewer';
 
 describe('MarkdownViewer citation rendering', () => {
   it('renders (C1) as a superscript citation', () => {
@@ -39,5 +39,15 @@ describe('MarkdownViewer citation rendering', () => {
     const sups = document.querySelectorAll('sup.md-citation');
     expect(sups.length).toBe(1);
     expect(sups[0].textContent).toBe('(C1)');
+  });
+
+  it('applies the brief variant class when requested', () => {
+    render(<MarkdownViewer content="## Brief\n\nParagraph" variant="brief" />);
+    expect(document.querySelector('.md-viewer-brief')).toBeTruthy();
+  });
+
+  it('compresses excessive blank lines in brief mode without changing default mode', () => {
+    expect(normalizeMarkdownForVariant('A\r\n\r\n\r\n\r\nB', 'brief')).toBe('A\n\n\nB');
+    expect(normalizeMarkdownForVariant('A\r\n\r\n\r\n\r\nB', 'default')).toBe('A\n\n\n\nB');
   });
 });

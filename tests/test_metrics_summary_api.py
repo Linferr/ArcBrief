@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import sys
+from types import SimpleNamespace
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
@@ -41,17 +42,59 @@ class _DummyMetricsAgent:
             fallback_reason="Bocha Search unavailable: missing",
             llm_assisted_search=False,
         )
-        self.last_state = None
+        self.last_state = SimpleNamespace(
+            spec=SimpleNamespace(
+                premise_status="invalid",
+                original_query="chatgpt5.4 updates and optimization",
+                effective_query=(
+                    "Verify whether ChatGPT-5.4 is an official OpenAI release and summarize actual recent OpenAI updates."
+                ),
+                report_type_requested="industry_brief",
+                report_type_effective="claim_audit",
+            ),
+            delivery_status="full",
+            gate_decision="PASS",
+            blocking_issues=[],
+            report_type="claim_audit",
+            report_type_requested="industry_brief",
+            report_type_effective="claim_audit",
+            planning_template="claim_audit",
+            report_shape="long_analysis",
+            length_preset="long",
+            quality_mode="quality_first",
+            final_report="# Report\n\n## Official Status Check\nAlpha.\n\n## Practical Takeaways\nBeta.",
+            section_assessments=[
+                {
+                    "title": "Official Status Check",
+                    "gate_decision": "PASS",
+                    "overall_score": 4,
+                    "primary_source_count": 2,
+                    "source_count": 3,
+                }
+            ],
+            global_source_map={
+                "S1": {"title": "Primary note", "url": "https://openai.com/blog/post", "source_type": "primary"},
+                "S2": {"title": "Secondary coverage", "url": "https://example.com/report", "source_type": "secondary"},
+                "S3": {
+                    "title": "OpenAI models docs",
+                    "url": "https://platform.openai.com/docs/models",
+                    "source_type": "primary",
+                },
+            },
+        )
 
-    def research(self, query, progress_cb=None, language="English (US)"):
+    def research(self, query, progress_cb=None, language="English (US)", report_type=None, length_preset="long"):
         events = [
+            {"stage": "premise_check", "message": "premise=invalid reframed=true report_type=claim_audit", "run_id": "unit"},
             {"stage": "outline", "message": "Outline generated", "run_id": "unit"},
             {"stage": "search", "message": "Search: first query", "run_id": "unit"},
             {"stage": "summary", "message": "Summary round 1 ready", "round": 1, "run_id": "unit"},
-            {"stage": "critic_gate", "message": "decision=REVISE score=2 blocking=lack primary source", "round": 1, "run_id": "unit"},
-            {"stage": "reflection", "message": "Reflection search: official source", "round": 1, "run_id": "unit"},
-            {"stage": "summary", "message": "Summary round 2 ready", "round": 2, "run_id": "unit"},
-            {"stage": "critic_gate", "message": "decision=PASS score=4 blocking=none", "round": 2, "run_id": "unit"},
+            {
+                "stage": "critic_gate",
+                "message": "decision=PASS score=4 blocking=none official_sources=2",
+                "round": 1,
+                "run_id": "unit",
+            },
             {"stage": "final", "message": "Report formatted", "run_id": "unit"},
         ]
         if progress_cb:
@@ -61,6 +104,17 @@ class _DummyMetricsAgent:
 
     def save_report(self, report, output_dir):
         return os.path.join(output_dir, "metrics_report.md")
+
+    def llm_usage_summary(self):
+        return {
+            "request_count": 7,
+            "prompt_tokens": 2100,
+            "completion_tokens": 1400,
+            "total_tokens": 3500,
+            "estimated_cost_usd": 0.42,
+            "model_requested": "qwen3-max",
+            "model_effective": "qwen3-max",
+        }
 
 
 class _DummyDB:
@@ -97,10 +151,17 @@ class _DummyDB:
                     "total_duration_sec": 90,
                     "step_count": 6,
                     "search_calls": 2,
-                    "reflection_rounds": 1,
+                    "reflection_rounds": 0,
                     "fallback_triggered": False,
                     "provider_effective": "Exa Search",
                     "provider_fallback_reason": "",
+                    "premise_status": "valid",
+                    "query_reframed": False,
+                    "original_query": "db query",
+                    "effective_query": "db query",
+                    "report_type_requested": "company_analysis",
+                    "report_type_effective": "company_analysis",
+                    "official_source_count": 1,
                 },
             }
         ]
@@ -154,13 +215,32 @@ def test_run_job_computes_metrics_summary(monkeypatch):
         summary = record.metrics_summary
         assert summary["task_completion"] is True
         assert summary["step_count"] == len(record.events)
-        assert summary["search_calls"] == 2
-        assert summary["reflection_rounds"] == 1
+        assert summary["search_calls"] == 1
+        assert summary["reflection_rounds"] == 0
         assert summary["fallback_triggered"] is True
         assert summary["provider_effective"] == "Tavily Search API"
         assert summary["provider_fallback_reason"] == "Bocha Search unavailable: missing"
+        assert summary["premise_status"] == "invalid"
+        assert summary["query_reframed"] is True
+        assert summary["original_query"] == "chatgpt5.4 updates and optimization"
+        assert "official OpenAI release" in summary["effective_query"]
+        assert summary["report_type"] == "claim_audit"
+        assert summary["report_type_requested"] == "industry_brief"
+        assert summary["report_type_effective"] == "claim_audit"
+        assert summary["planning_template"] == "claim_audit"
+        assert summary["report_shape"] == "long_analysis"
+        assert summary["length_preset"] == "long"
+        assert summary["quality_mode"] == "quality_first"
+        assert summary["prompt_tokens"] == 2100
+        assert summary["completion_tokens"] == 1400
+        assert summary["total_tokens"] == 3500
+        assert summary["estimated_cost_usd"] == 0.42
+        assert summary["word_count"] >= 5
+        assert summary["primary_source_count"] == 2
+        assert summary["official_source_count"] == 2
+        assert summary["section_gate_results"][0]["title"] == "Official Status Check"
         assert isinstance(summary["total_duration_sec"], int)
-        assert db.saved_runs[-1]["metrics_summary"]["search_calls"] == 2
+        assert db.saved_runs[-1]["metrics_summary"]["search_calls"] == 1
     finally:
         RUNS.pop(run_id, None)
 
@@ -174,6 +254,22 @@ def test_status_and_history_expose_metrics_summary(monkeypatch):
         run_id=run_id,
         query="memory query",
         status="done",
+        report_type="claim_audit",
+        report_shape="long_analysis",
+        length_preset="long",
+        planning_template="claim_audit",
+        premise_status="invalid",
+        query_reframed=True,
+        original_query="chatgpt5.4 updates",
+        effective_query="Verify whether ChatGPT-5.4 exists and summarize actual OpenAI updates",
+        report_type_requested="industry_brief",
+        report_type_effective="claim_audit",
+        word_count=120,
+        prompt_tokens=500,
+        completion_tokens=300,
+        estimated_cost_usd=0.08,
+        primary_source_count=2,
+        section_gate_results=[{"title": "Official Status Check", "gate_decision": "PASS"}],
         metrics_summary={
             "task_completion": True,
             "total_duration_sec": 12,
@@ -183,18 +279,43 @@ def test_status_and_history_expose_metrics_summary(monkeypatch):
             "fallback_triggered": False,
             "provider_effective": "Tavily Search API",
             "provider_fallback_reason": "",
+            "premise_status": "invalid",
+            "query_reframed": True,
+            "original_query": "chatgpt5.4 updates",
+            "effective_query": "Verify whether ChatGPT-5.4 exists and summarize actual OpenAI updates",
+            "report_type_requested": "industry_brief",
+            "report_type_effective": "claim_audit",
+            "official_source_count": 2,
         },
     )
     try:
         status = m.get_status(run_id)
         assert status.metrics_summary["step_count"] == 4
         assert status.metrics_summary["provider_effective"] == "Tavily Search API"
+        assert status.report_type == "claim_audit"
+        assert status.premise_status == "invalid"
+        assert status.query_reframed is True
+        assert status.report_type_requested == "industry_brief"
+        assert status.report_type_effective == "claim_audit"
+        assert status.official_source_count == 2
+        assert status.word_count == 120
+        assert status.prompt_tokens == 500
+        assert status.estimated_cost_usd == 0.08
+        assert status.section_gate_results[0]["title"] == "Official Status Check"
 
         history = m.get_history()
         memory_item = next(item for item in history["results"] if item["run_id"] == run_id)
         db_item = next(item for item in history["results"] if item["run_id"] == "db_metrics")
         assert memory_item["metrics_summary"]["search_calls"] == 1
         assert db_item["metrics_summary"]["total_duration_sec"] == 90
+        assert memory_item["report_type"] == "claim_audit"
+        assert memory_item["premise_status"] == "invalid"
+        assert memory_item["query_reframed"] is True
+        assert memory_item["report_type_requested"] == "industry_brief"
+        assert memory_item["report_type_effective"] == "claim_audit"
+        assert memory_item["official_source_count"] == 2
+        assert memory_item["word_count"] == 120
+        assert memory_item["estimated_cost_usd"] == 0.08
     finally:
         RUNS.pop(run_id, None)
 
@@ -225,6 +346,13 @@ def test_metrics_summary_migration_and_round_trip(tmp_path):
             "fallback_triggered": False,
             "provider_effective": "Exa Search",
             "provider_fallback_reason": "",
+            "premise_status": "valid",
+            "query_reframed": False,
+            "original_query": "q",
+            "effective_query": "q",
+            "report_type_requested": "company_analysis",
+            "report_type_effective": "company_analysis",
+            "official_source_count": 1,
         },
     )
 
@@ -232,3 +360,5 @@ def test_metrics_summary_migration_and_round_trip(tmp_path):
     assert row is not None
     assert row["metrics_summary"]["step_count"] == 5
     assert row["metrics_summary"]["provider_effective"] == "Exa Search"
+    assert row["metrics_summary"]["premise_status"] == "valid"
+    assert row["metrics_summary"]["official_source_count"] == 1

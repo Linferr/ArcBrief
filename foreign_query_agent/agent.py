@@ -1,6 +1,7 @@
 """Main QueryAgent implementation."""
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import inspect
 import os
 import re
 import threading
@@ -10,9 +11,19 @@ from urllib.parse import urlparse
 
 from .config import Settings
 from .llm import LLMClient, LLMConfig, MockLLM
-from .state import CriticResult, ParagraphState, ReportState, SearchItem
+from .state import (
+    CriticResult,
+    EvidenceItem,
+    ParagraphState,
+    ReportState,
+    ResearchSpec,
+    SearchItem,
+    SectionAssessment,
+    SectionPlan,
+)
 from .nodes.formatting import FormattingNode
 from .nodes.host import HostNode
+from .nodes.premise_check import PremiseCheckNode
 from .nodes.reflection import ReflectionNode
 from .nodes.report_structure import ReportStructureNode
 from .nodes.search_plan import SearchPlanNode
@@ -31,6 +42,22 @@ _PRIORITY_SOURCE_HOSTS = (
     "substack.com",
     "youtube.com",
     "podcast",
+)
+
+_PRIMARY_SOURCE_HINTS = (
+    "x.com",
+    "twitter.com",
+    "github.com",
+    ".gov",
+    ".edu",
+    "sec.gov",
+    "europa.eu",
+    "whitehouse.gov",
+    "docs.",
+    "developer.",
+    "research.",
+    "blog.",
+    "press.",
 )
 
 
@@ -88,6 +115,7 @@ class QueryAgent:
                     self.runtime_fallback_meta = fallback_meta
 
         self.structure_node = ReportStructureNode(self.llm)
+        self.premise_node = PremiseCheckNode(self.llm)
         self.search_node = SearchPlanNode(self.llm)
         self.summary_node = SummaryNode(self.llm)
         self.reflection_node = ReflectionNode(self.llm)
@@ -95,344 +123,149 @@ class QueryAgent:
         self.formatting_node = FormattingNode(self.llm)
         self.host_node = HostNode(self.llm)
 
-    def research(self, query: str, progress_cb=None, language: str = "English (US)") -> str:
-        language_used = language if language in {"English (US)", "Chinese (Simplified)", "Japanese"} else "English (US)"
-        state = ReportState(query=query)
-        run_id = self._build_run_id(query)
-        outline = self.structure_node.run(query, language=language_used)[: self.settings.max_paragraphs]
-        if progress_cb:
-            progress_cb({"stage": "outline", "message": "Outline generated", "run_id": run_id})
+    @staticmethod
+    def _normalize_language(language: str) -> str:
+        return language if language in {"English (US)", "Chinese (Simplified)", "Japanese"} else "English (US)"
 
-        for item in outline:
-            paragraph = ParagraphState(title=item["title"], content=item["content"])
-            state.paragraphs.append(paragraph)
+    @staticmethod
+    def _invoke_node_run(node: Any, *args, **kwargs):
+        run_fn = getattr(node, "run")
+        signature = inspect.signature(run_fn)
+        accepted_kwargs = {
+            key: value for key, value in kwargs.items() if key in signature.parameters
+        }
+        return run_fn(*args, **accepted_kwargs)
 
-        total_paragraphs = len(state.paragraphs)
-        for idx, paragraph in enumerate(state.paragraphs):
-            try:
-                write_log("query", f"SearchPlan: {paragraph.title}", run_id=run_id)
-                plan = self.search_node.run(
-                    paragraph.title,
-                    paragraph.content,
-                    language=language_used,
-                    recency_mode=self.settings.research_recency_mode,
-                )
-                queries = self._ensure_recency_query(
-                    self._expand_query_pack(plan, fallback=f"{paragraph.title} latest {datetime.utcnow().year}"),
-                    paragraph.title,
-                )
+    @staticmethod
+    def _normalize_report_type(report_type: str) -> str:
+        normalized = (report_type or "").strip().lower()
+        mapping = {
+            "industry": "industry_brief",
+            "industry_brief": "industry_brief",
+            "company": "company_analysis",
+            "company_analysis": "company_analysis",
+            "person": "person_profile",
+            "person_profile": "person_profile",
+            "policy": "policy_analysis",
+            "policy_analysis": "policy_analysis",
+            "claim_audit": "claim_audit",
+            "claim-audit": "claim_audit",
+            "fact_check": "claim_audit",
+            "fact-check": "claim_audit",
+            "product_fact_check": "claim_audit",
+        }
+        return mapping.get(normalized, "industry_brief")
 
-                batches: List[List[Dict[str, str]]] = []
-                for search_query in queries:
-                    write_log("query", f"Search: {search_query}", run_id=run_id)
-                    if progress_cb:
-                        progress_cb(
-                            {
-                                "stage": "search",
-                                "message": f"Search: {search_query}",
-                                "paragraph": paragraph.title,
-                                "paragraph_idx": idx + 1,
-                                "total_paragraphs": total_paragraphs,
-                                "run_id": run_id,
-                            }
-                        )
-                    response = self.tool.search(search_query, max_results=self.settings.max_results)
-                    batch = [r.__dict__ for r in response.results]
-                    batches.append(batch)
-                    for r in response.results:
-                        paragraph.search_history.append(
-                            SearchItem(query=search_query, title=r.title, url=r.url, content=r.content)
-                        )
+    def llm_usage_summary(self) -> Dict[str, Any]:
+        summary_fn = getattr(self.llm, "usage_summary", None)
+        if callable(summary_fn):
+            data = summary_fn()
+            if isinstance(data, dict):
+                return data
+        return {}
 
-                ranked_results = self._merge_and_rank_results(paragraph.title, paragraph.content, batches)
-                year_range = self._detect_year_range(ranked_results)
-                if year_range and progress_cb:
-                    progress_cb(
-                        {
-                            "stage": "search_window",
-                            "message": f"Evidence year range: {year_range[0]}-{year_range[1]}",
-                            "paragraph": paragraph.title,
-                            "paragraph_idx": idx + 1,
-                            "total_paragraphs": total_paragraphs,
-                            "run_id": run_id,
-                        }
-                    )
-
-                summary_text, summary_smap = self.summary_node.run(
-                    paragraph.title,
-                    paragraph.content,
-                    " | ".join(queries),
-                    ranked_results,
-                    language=language_used,
-                )
-                paragraph.latest_summary, paragraph.source_map = self._assign_global_source_ids(
-                    summary_text,
-                    summary_smap,
-                    state,
-                )
-                if paragraph.latest_summary:
-                    write_log("query", f"Summary round 1: {paragraph.latest_summary[:300]}...", run_id=run_id)
-                    if progress_cb:
-                        progress_cb(
-                            {
-                                "stage": "summary",
-                                "message": "Summary round 1 ready",
-                                "paragraph": paragraph.title,
-                                "paragraph_idx": idx + 1,
-                                "total_paragraphs": total_paragraphs,
-                                "round": 1,
-                                "run_id": run_id,
-                            }
-                        )
-
-                while True:
-                    host_feedback = self.host_node.run(
-                        paragraph.title,
-                        paragraph.content,
-                        paragraph.latest_summary,
-                        language=language_used,
-                    )
-                    critic_result = CriticResult.from_payload(
-                        host_feedback,
-                        fallback_query=f"{paragraph.title} evidence statistics",
-                    )
-                    paragraph.host_critiques.append(
-                        {
-                            "gate_decision": critic_result.gate_decision,
-                            "overall_score": str(critic_result.overall_score),
-                            "blocking_issues": "; ".join(critic_result.blocking_issues),
-                            "critique": critic_result.critique,
-                            "questions": "; ".join(critic_result.questions),
-                            "suggested_search": "; ".join(critic_result.suggested_queries),
-                        }
-                    )
-                    write_log("host", f"Critique: {critic_result.critique}", run_id=run_id)
-                    write_log("host", f"Questions: {'; '.join(critic_result.questions)}", run_id=run_id)
-                    write_log(
-                        "host",
-                        f"Suggested search: {'; '.join(critic_result.suggested_queries)}",
-                        run_id=run_id,
-                    )
-                    write_log(
-                        "host",
-                        (
-                            f"Critic gate: decision={critic_result.gate_decision} "
-                            f"score={critic_result.overall_score} "
-                            f"blocking={'; '.join(critic_result.blocking_issues) or 'none'}"
-                        ),
-                        run_id=run_id,
-                    )
-                    if progress_cb:
-                        progress_cb(
-                            {
-                                "stage": "host",
-                                "message": critic_result.critique,
-                                "paragraph": paragraph.title,
-                                "paragraph_idx": idx + 1,
-                                "total_paragraphs": total_paragraphs,
-                                "round": paragraph.reflection_count + 1,
-                                "run_id": run_id,
-                            }
-                        )
-                        progress_cb(
-                            {
-                                "stage": "critic_gate",
-                                "message": (
-                                    f"decision={critic_result.gate_decision} "
-                                    f"score={critic_result.overall_score} "
-                                    f"blocking={'; '.join(critic_result.blocking_issues) or 'none'}"
-                                ),
-                                "paragraph": paragraph.title,
-                                "paragraph_idx": idx + 1,
-                                "total_paragraphs": total_paragraphs,
-                                "round": paragraph.reflection_count + 1,
-                                "run_id": run_id,
-                            }
-                        )
-
-                    if critic_result.gate_decision == "PASS":
-                        break
-
-                    if critic_result.gate_decision == "REJECT":
-                        final_report = self._build_gate_blocked_report(
-                            query=state.query,
-                            paragraph=paragraph,
-                            critic_result=critic_result,
-                            language=language_used,
-                            exhausted=False,
-                            state=state,
-                        )
-                        write_log("query", "Final report blocked by critic gate", run_id=run_id)
-                        if progress_cb:
-                            progress_cb(
-                                {
-                                    "stage": "final",
-                                    "message": "Report blocked by critic gate",
-                                    "run_id": run_id,
-                                }
-                            )
-                        state.final_report = final_report
-                        state.touch()
-                        self.last_state = state
-                        self.last_run_id = run_id
-                        return final_report
-
-                    if paragraph.reflection_count >= self.settings.max_reflections:
-                        final_report = self._build_gate_blocked_report(
-                            query=state.query,
-                            paragraph=paragraph,
-                            critic_result=critic_result,
-                            language=language_used,
-                            exhausted=True,
-                            state=state,
-                        )
-                        write_log("query", "Final report blocked after max reflections", run_id=run_id)
-                        if progress_cb:
-                            progress_cb(
-                                {
-                                    "stage": "final",
-                                    "message": "Report blocked after max reflections",
-                                    "run_id": run_id,
-                                }
-                            )
-                        state.final_report = final_report
-                        state.touch()
-                        self.last_state = state
-                        self.last_run_id = run_id
-                        return final_report
-
-                    suggested_queries = list(critic_result.suggested_queries)
-                    if suggested_queries:
-                        queries = [q for q in suggested_queries[:3] if isinstance(q, str) and q.strip()]
-                    else:
-                        reflect = self.reflection_node.run(
-                            paragraph.title,
-                            paragraph.content,
-                            paragraph.latest_summary,
-                            language=language_used,
-                            recency_mode=self.settings.research_recency_mode,
-                        )
-                        queries = self._expand_query_pack(
-                            reflect,
-                            fallback=f"{paragraph.title} updates {datetime.utcnow().year}",
-                        )
-                    queries = self._ensure_recency_query(queries, paragraph.title)
-
-                    reflection_batches: List[List[Dict[str, str]]] = []
-                    for query_text in queries:
-                        write_log("query", f"Reflection search: {query_text}", run_id=run_id)
-                        if progress_cb:
-                            progress_cb(
-                                {
-                                    "stage": "reflection",
-                                    "message": f"Reflection search: {query_text}",
-                                    "paragraph": paragraph.title,
-                                    "paragraph_idx": idx + 1,
-                                    "total_paragraphs": total_paragraphs,
-                                    "round": paragraph.reflection_count + 1,
-                                    "run_id": run_id,
-                                }
-                            )
-                        response = self.tool.search(query_text, max_results=self.settings.max_results)
-                        batch = [r.__dict__ for r in response.results]
-                        reflection_batches.append(batch)
-                        for r in response.results:
-                            paragraph.search_history.append(
-                                SearchItem(query=query_text, title=r.title, url=r.url, content=r.content)
-                            )
-
-                    ranked_reflection_results = self._merge_and_rank_results(
-                        paragraph.title,
-                        paragraph.content,
-                        reflection_batches,
-                    )
-
-                    refl_text, refl_smap = self.reflection_summary_node.run(
-                        paragraph.title,
-                        paragraph.content,
-                        " | ".join(queries),
-                        ranked_reflection_results,
-                        paragraph.latest_summary,
-                        language=language_used,
-                    )
-                    paragraph.latest_summary, paragraph.source_map = self._assign_global_source_ids(
-                        refl_text,
-                        refl_smap,
-                        state,
-                    )
-
-                    paragraph.reflection_count += 1
-                    if paragraph.latest_summary:
-                        write_log(
-                            "query",
-                            f"Summary round {paragraph.reflection_count + 1}: {paragraph.latest_summary[:300]}...",
-                            run_id=run_id,
-                        )
-                        if progress_cb:
-                            progress_cb(
-                                {
-                                    "stage": "summary",
-                                    "message": f"Summary round {paragraph.reflection_count + 1} ready",
-                                    "paragraph": paragraph.title,
-                                    "paragraph_idx": idx + 1,
-                                    "total_paragraphs": total_paragraphs,
-                                    "round": paragraph.reflection_count + 1,
-                                    "run_id": run_id,
-                                }
-                            )
-            except Exception as e:
-                write_log("query", f"ERROR processing paragraph '{paragraph.title}': {e}", run_id=run_id)
-                if progress_cb:
-                    progress_cb(
-                        {
-                            "stage": "error",
-                            "message": f"Skipped paragraph {idx + 1}: {str(e)[:50]}",
-                            "paragraph": paragraph.title,
-                            "paragraph_idx": idx + 1,
-                            "total_paragraphs": total_paragraphs,
-                            "run_id": run_id,
-                        }
-                    )
-                paragraph.latest_summary = f"Evidence insufficient for this section due to processing error: {str(e)[:100]}"
-                continue
-
-        final_report = self.formatting_node.run(
-            [{"title": p.title, "content": p.latest_summary} for p in state.paragraphs],
-            language=language_used,
-        )
-        final_report = self._strip_stale_sources(final_report)
-        final_report = self._strip_orphan_refs(final_report, state.global_source_map)
-        final_report = self._append_sources_from_map(final_report, state.global_source_map, language_used)
-        write_log("query", "Final report generated", run_id=run_id)
-        if progress_cb:
-            progress_cb({"stage": "final", "message": "Report formatted", "run_id": run_id})
-        state.delivery_status = "full"
-        state.gate_decision = "PASS"
-        state.blocking_issues = []
-        state.final_report = final_report
-        state.touch()
-        self.last_state = state
-        self.last_run_id = run_id
-        return final_report
-
-    def research(self, query: str, progress_cb=None, language: str = "English (US)") -> str:
-        language_used = language if language in {"English (US)", "Chinese (Simplified)", "Japanese"} else "English (US)"
-        state = ReportState(query=query)
-        run_id = self._build_run_id(query)
-        planning_template = (
+    def research(
+        self,
+        query: str,
+        progress_cb=None,
+        language: str = "English (US)",
+        report_type: Optional[str] = None,
+        length_preset: str = "long",
+    ) -> str:
+        language_used = self._normalize_language(language)
+        report_shape = "long_analysis"
+        quality_mode = "quality_first"
+        original_query = query
+        requested_report_type = report_type or (
             self.structure_node.select_template(query)
             if hasattr(self.structure_node, "select_template")
             else "industry_brief"
         )
+        premise_result = self._invoke_node_run(self.premise_node, query, language=language_used)
+        premise_status = str(premise_result.get("premise_status") or "valid").strip().lower()
+        if premise_status not in {"valid", "disputed", "invalid"}:
+            premise_status = "valid"
+        effective_query = str(premise_result.get("reframed_query") or query).strip() or query
+        recommended_report_type = str(premise_result.get("recommended_report_type") or "").strip()
+        report_type_requested = self._normalize_report_type(requested_report_type)
+        report_type_effective = report_type_requested
+        if premise_status in {"invalid", "disputed"} and recommended_report_type:
+            report_type_effective = self._normalize_report_type(recommended_report_type)
+        spec = ResearchSpec(
+            query=original_query,
+            language=language_used,
+            report_shape=report_shape,
+            report_type=report_type_effective,
+            report_type_requested=report_type_requested,
+            report_type_effective=report_type_effective,
+            length_preset=length_preset,
+            quality_mode=quality_mode,
+            original_query=original_query,
+            effective_query=effective_query,
+            premise_status=premise_status,
+            validation_notes=str(premise_result.get("validation_notes") or "").strip(),
+            official_queries=[
+                str(item).strip()
+                for item in (premise_result.get("official_queries") or [])
+                if str(item).strip()
+            ],
+        )
+        state = ReportState(
+            query=original_query,
+            spec=spec,
+            report_type=report_type_effective,
+            report_type_requested=report_type_requested,
+            report_type_effective=report_type_effective,
+            report_shape=report_shape,
+            length_preset=length_preset,
+            quality_mode=quality_mode,
+        )
+        run_id = self._build_run_id(query)
+        planning_template = report_type_effective
         state.planning_template = planning_template
-        if hasattr(self.structure_node, "run_with_template"):
-            outline = self.structure_node.run_with_template(
-                query,
-                template_key=planning_template,
+        if progress_cb:
+            progress_cb(
+                {
+                    "stage": "premise_check",
+                    "message": (
+                        f"premise={premise_status} "
+                        f"reframed={str(effective_query != original_query).lower()} "
+                        f"report_type={report_type_effective}"
+                    ),
+                    "run_id": run_id,
+                }
+            )
+        if hasattr(self.structure_node, "run_plan"):
+            plan_bundle = self.structure_node.run_plan(
+                effective_query,
                 language=language_used,
-            )[: self.settings.max_paragraphs]
+                report_shape=report_shape,
+                length_preset=length_preset or "long",
+                report_type=planning_template,
+            )
+            section_plans = [
+                SectionPlan(
+                    title=str(item.get("title") or "").strip(),
+                    content=str(item.get("content") or "").strip(),
+                    evidence_type=str(item.get("evidence_type") or "mixed").strip() or "mixed",
+                    target_words=max(220, int(item.get("target_words") or 260)),
+                    pass_criteria=str(item.get("pass_criteria") or "").strip(),
+                    subquestions=[
+                        str(question).strip()
+                        for question in (item.get("subquestions") or [])
+                        if str(question).strip()
+                    ],
+                )
+                for item in (plan_bundle.get("sections") or [])
+                if str(item.get("title") or "").strip() and str(item.get("content") or "").strip()
+            ][: self.settings.max_paragraphs]
         else:
-            outline = self.structure_node.run(query, language=language_used)[: self.settings.max_paragraphs]
+            outline = self.structure_node.run(effective_query, language=language_used)[: self.settings.max_paragraphs]
+            section_plans = [
+                SectionPlan(title=item["title"], content=item["content"])
+                for item in outline
+            ]
+        state.section_plans = list(section_plans)
         if progress_cb:
             progress_cb(
                 {
@@ -442,8 +275,10 @@ class QueryAgent:
                 }
             )
 
-        for item in outline:
-            state.paragraphs.append(ParagraphState(title=item["title"], content=item["content"]))
+        for section_plan in section_plans:
+            state.paragraphs.append(
+                ParagraphState(title=section_plan.title, content=section_plan.content, plan=section_plan)
+            )
 
         total_paragraphs = len(state.paragraphs)
         section_results = self._run_section_pipeline(
@@ -467,14 +302,23 @@ class QueryAgent:
             if progress_cb:
                 progress_cb({"stage": "final", "message": "Report blocked by critic gate", "run_id": run_id})
             state.final_report = final_report
+            state.section_assessments = [
+                paragraph.assessment.to_dict()
+                for paragraph in state.paragraphs
+                if paragraph.assessment is not None
+            ]
             state.touch()
             self.last_state = state
             self.last_run_id = run_id
             return final_report
 
-        final_report = self.formatting_node.run(
+        final_report = self._invoke_node_run(
+            self.formatting_node,
             [{"title": paragraph.title, "content": paragraph.latest_summary} for paragraph in state.paragraphs],
             language=language_used,
+            section_plans=state.section_plans,
+            report_shape=state.report_shape,
+            report_type=state.report_type,
         )
         final_report = self._strip_stale_sources(final_report)
         final_report = self._strip_orphan_refs(final_report, state.global_source_map)
@@ -486,6 +330,11 @@ class QueryAgent:
         state.gate_decision = "PASS"
         state.blocking_issues = []
         state.final_report = final_report
+        state.section_assessments = [
+            paragraph.assessment.to_dict()
+            for paragraph in state.paragraphs
+            if paragraph.assessment is not None
+        ]
         state.touch()
         self.last_state = state
         self.last_run_id = run_id
@@ -637,16 +486,28 @@ class QueryAgent:
         guard = section_semaphore or _NullSemaphore()
         with guard:
             try:
+                plan = paragraph.plan or SectionPlan(title=paragraph.title, content=paragraph.content)
+                effective_report_type = state.report_type_effective or state.report_type
                 write_log("query", f"SearchPlan: {paragraph.title}", run_id=run_id)
-                plan = self.search_node.run(
+                search_plan = self._invoke_node_run(
+                    self.search_node,
                     paragraph.title,
                     paragraph.content,
                     language=language_used,
                     recency_mode=self.settings.research_recency_mode,
+                    report_type=effective_report_type,
+                    evidence_type=plan.evidence_type,
+                    target_words=plan.target_words,
+                    subquestions=plan.subquestions,
+                    original_query=(state.spec.original_query if state.spec else state.query),
+                    effective_query=(state.spec.effective_query if state.spec else state.query),
+                    premise_status=(state.spec.premise_status if state.spec else "valid"),
+                    official_queries=(state.spec.official_queries if state.spec else []),
                 )
                 queries = self._ensure_recency_query(
-                    self._expand_query_pack(plan, fallback=f"{paragraph.title} latest {datetime.utcnow().year}"),
+                    self._expand_query_pack(search_plan, fallback=f"{paragraph.title} latest {datetime.utcnow().year}"),
                     paragraph.title,
+                    report_type=effective_report_type,
                 )
 
                 batches: List[List[Dict[str, str]]] = []
@@ -671,13 +532,15 @@ class QueryAgent:
                         paragraph_idx=idx,
                         total_paragraphs=total_paragraphs,
                     )
-                    batches.append([result.__dict__ for result in response.results])
+                    result_batch = [self._normalize_result_item(result.__dict__) for result in response.results]
+                    batches.append(result_batch)
                     for result in response.results:
                         paragraph.search_history.append(
                             SearchItem(query=search_query, title=result.title, url=result.url, content=result.content)
                         )
 
                 ranked_results = self._merge_and_rank_results(paragraph.title, paragraph.content, batches)
+                paragraph.evidence_items = self._build_evidence_items(ranked_results)
                 year_range = self._detect_year_range(ranked_results)
                 if year_range and progress_cb:
                     progress_cb(
@@ -691,12 +554,20 @@ class QueryAgent:
                         }
                     )
 
-                summary_text, summary_smap = self.summary_node.run(
+                summary_text, summary_smap = self._invoke_node_run(
+                    self.summary_node,
                     paragraph.title,
                     paragraph.content,
                     " | ".join(queries),
                     ranked_results,
                     language=language_used,
+                    report_type=effective_report_type,
+                    target_words=plan.target_words,
+                    quality_mode=state.quality_mode,
+                    evidence_type=plan.evidence_type,
+                    original_query=(state.spec.original_query if state.spec else state.query),
+                    effective_query=(state.spec.effective_query if state.spec else state.query),
+                    premise_status=(state.spec.premise_status if state.spec else "valid"),
                 )
                 with source_lock:
                     paragraph.latest_summary, paragraph.source_map = self._assign_global_source_ids(
@@ -720,11 +591,14 @@ class QueryAgent:
                         )
 
                 while True:
-                    host_feedback = self.host_node.run(
+                    host_feedback = self._invoke_node_run(
+                        self.host_node,
                         paragraph.title,
                         paragraph.content,
                         paragraph.latest_summary,
                         language=language_used,
+                        report_type=effective_report_type,
+                        premise_status=(state.spec.premise_status if state.spec else "valid"),
                     )
                     critic_result = CriticResult.from_payload(
                         host_feedback,
@@ -780,6 +654,17 @@ class QueryAgent:
                             }
                         )
 
+                    paragraph.assessment = SectionAssessment(
+                        title=paragraph.title,
+                        gate_decision=critic_result.gate_decision,
+                        overall_score=critic_result.overall_score,
+                        blocking_issues=list(critic_result.blocking_issues),
+                        source_count=len(paragraph.source_map),
+                        primary_source_count=sum(
+                            1 for info in paragraph.source_map.values() if (info.get("source_type") or "") == "primary"
+                        ),
+                    )
+
                     if critic_result.gate_decision == "PASS":
                         return {
                             "paragraph_idx": idx,
@@ -814,18 +699,31 @@ class QueryAgent:
                     if suggested_queries:
                         queries = [item for item in suggested_queries[:3] if isinstance(item, str) and item.strip()]
                     else:
-                        reflect = self.reflection_node.run(
+                        reflect = self._invoke_node_run(
+                            self.reflection_node,
                             paragraph.title,
                             paragraph.content,
                             paragraph.latest_summary,
                             language=language_used,
                             recency_mode=self.settings.research_recency_mode,
+                            report_type=effective_report_type,
+                            evidence_type=plan.evidence_type,
+                            target_words=plan.target_words,
+                            subquestions=plan.subquestions,
+                            original_query=(state.spec.original_query if state.spec else state.query),
+                            effective_query=(state.spec.effective_query if state.spec else state.query),
+                            premise_status=(state.spec.premise_status if state.spec else "valid"),
+                            official_queries=(state.spec.official_queries if state.spec else []),
                         )
                         queries = self._expand_query_pack(
                             reflect,
                             fallback=f"{paragraph.title} updates {datetime.utcnow().year}",
                         )
-                    queries = self._ensure_recency_query(queries, paragraph.title)
+                    queries = self._ensure_recency_query(
+                        queries,
+                        paragraph.title,
+                        report_type=effective_report_type,
+                    )
 
                     reflection_batches: List[List[Dict[str, str]]] = []
                     for query_text in queries:
@@ -851,7 +749,10 @@ class QueryAgent:
                             total_paragraphs=total_paragraphs,
                             round_number=paragraph.reflection_count + 1,
                         )
-                        reflection_batches.append([result.__dict__ for result in response.results])
+                        reflection_result_batch = [
+                            self._normalize_result_item(result.__dict__) for result in response.results
+                        ]
+                        reflection_batches.append(reflection_result_batch)
                         for result in response.results:
                             paragraph.search_history.append(
                                 SearchItem(query=query_text, title=result.title, url=result.url, content=result.content)
@@ -862,13 +763,22 @@ class QueryAgent:
                         paragraph.content,
                         reflection_batches,
                     )
-                    refl_text, refl_smap = self.reflection_summary_node.run(
+                    paragraph.evidence_items = self._build_evidence_items(ranked_reflection_results)
+                    refl_text, refl_smap = self._invoke_node_run(
+                        self.reflection_summary_node,
                         paragraph.title,
                         paragraph.content,
                         " | ".join(queries),
                         ranked_reflection_results,
                         paragraph.latest_summary,
                         language=language_used,
+                        report_type=effective_report_type,
+                        target_words=plan.target_words,
+                        quality_mode=state.quality_mode,
+                        evidence_type=plan.evidence_type,
+                        original_query=(state.spec.original_query if state.spec else state.query),
+                        effective_query=(state.spec.effective_query if state.spec else state.query),
+                        premise_status=(state.spec.premise_status if state.spec else "valid"),
                     )
                     with source_lock:
                         paragraph.latest_summary, paragraph.source_map = self._assign_global_source_ids(
@@ -1003,6 +913,39 @@ class QueryAgent:
 
         return rewritten, paragraph_source_map
 
+    def _normalize_result_item(self, item: Dict[str, str]) -> Dict[str, str]:
+        normalized = dict(item or {})
+        host = self._extract_host(normalized.get("url") or "")
+        normalized["host"] = host
+        normalized["source_type"] = self._classify_source_type(normalized.get("url") or "", normalized.get("title") or "")
+        return normalized
+
+    def _classify_source_type(self, url: str, title: str) -> str:
+        host = self._extract_host(url)
+        lowered_title = (title or "").lower()
+        if not host:
+            return "unknown"
+        if any(marker in host for marker in _PRIMARY_SOURCE_HINTS):
+            return "primary"
+        if any(token in lowered_title for token in ("transcript", "official", "filing", "release notes")):
+            return "primary"
+        return "secondary"
+
+    def _build_evidence_items(self, results: List[Dict[str, str]]) -> List[EvidenceItem]:
+        evidence_items: List[EvidenceItem] = []
+        for idx, item in enumerate(results, start=1):
+            evidence_items.append(
+                EvidenceItem(
+                    source_id=f"S{idx}",
+                    title=str(item.get("title") or "").strip(),
+                    url=str(item.get("url") or "").strip(),
+                    content=str(item.get("content") or "").strip(),
+                    source_type=str(item.get("source_type") or "unknown").strip() or "unknown",
+                    host=str(item.get("host") or "").strip(),
+                )
+            )
+        return evidence_items
+
     @staticmethod
     def _strip_orphan_refs(report: str, global_source_map: Dict[str, Dict[str, str]]) -> str:
         """Remove [S#] references from the report that are not in the global source map."""
@@ -1034,13 +977,24 @@ class QueryAgent:
                 info = global_source_map[sid]
                 title = (info.get("title") or "Untitled").strip()
                 url = (info.get("url") or "").strip()
-                entry = f"- [{sid}] {title}"
+                if QueryAgent._is_placeholder_source_title(title):
+                    continue
+                source_type = str(info.get("source_type") or "").strip()
+                prefix = f"[{source_type}] " if source_type else ""
+                entry = f"- [{sid}] {prefix}{title}"
                 if url:
                     entry += f" -- {url}"
                 lines.append(entry)
-        else:
+        if len(lines) == 3:
             lines.append(empty_line)
         return report.rstrip() + "\n" + "\n".join(lines).rstrip() + "\n"
+
+    @staticmethod
+    def _is_placeholder_source_title(title: str) -> bool:
+        lowered = (title or "").strip().lower()
+        return bool(
+            re.match(r"^(volcano engine|tavily|exa|bocha|zhipu).*(result for|search result)", lowered)
+        )
 
     def _build_gate_blocked_report(
         self,
@@ -1066,9 +1020,19 @@ class QueryAgent:
         lines.extend(["", "## Blocking Issues"])
         for issue in critic_result.blocking_issues or ["Evidence quality remains below release threshold."]:
             lines.append(f"- {issue}")
-        lines.extend(["", "## Current Best-Effort Summary", summary, "", "## Suggested Follow-up Queries"])
+        lines.extend(["", "## Suggested Follow-up Queries"])
         for suggestion in critic_result.suggested_queries or ["Collect additional primary sources before re-running."]:
             lines.append(f"- {suggestion}")
+        lines.extend(
+            [
+                "",
+                "## Next Step",
+                "- Re-run after collecting stronger primary or official evidence for the blocked section.",
+                "",
+                "## Current Best-Effort Summary",
+                self._truncate_text(summary, 1200),
+            ]
+        )
         report = "\n".join(lines).strip()
         report = self._strip_stale_sources(report)
         report = self._strip_orphan_refs(report, state.global_source_map)
@@ -1076,6 +1040,13 @@ class QueryAgent:
         state.gate_decision = critic_result.gate_decision
         state.blocking_issues = list(critic_result.blocking_issues)
         return self._append_sources_from_map(report, state.global_source_map, language)
+
+    @staticmethod
+    def _truncate_text(text: str, max_chars: int) -> str:
+        cleaned = (text or "").strip()
+        if len(cleaned) <= max_chars:
+            return cleaned
+        return cleaned[: max(0, max_chars - 1)].rstrip() + "…"
 
     def _expand_query_pack(self, plan: Dict[str, object], fallback: str) -> List[str]:
         queries: List[str] = []
@@ -1095,8 +1066,10 @@ class QueryAgent:
             queries.append(fallback)
         return queries[:3]
 
-    def _ensure_recency_query(self, queries: List[str], title: str) -> List[str]:
+    def _ensure_recency_query(self, queries: List[str], title: str, report_type: str = "industry_brief") -> List[str]:
         cleaned = [q.strip() for q in queries if isinstance(q, str) and q.strip()]
+        if report_type == "claim_audit":
+            return cleaned[:3]
         has_recency = any(
             ("90 days" in q.lower()) or ("last 3 months" in q.lower()) or ("recent" in q.lower())
             for q in cleaned
