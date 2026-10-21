@@ -1,12 +1,16 @@
 import { createHmac } from 'node:crypto';
 import { isIP } from 'node:net';
 import { NextRequest } from 'next/server';
+import demoSnapshot from '../../../../demo-data/snapshot.json';
+import { DemoSnapshot, resolveStaticDemoRoute, StaticDemoResult } from '../staticDemo';
 
 const API_BASE = (process.env.ARCBRIEF_PROXY_API_BASE || 'http://localhost:8000/api').replace(/\/$/, '');
 const GUEST_API_KEY = (process.env.ARCBRIEF_PROXY_API_KEY || '').trim();
 const ADMIN_API_KEY = (process.env.ARCBRIEF_PROXY_ADMIN_KEY || '').trim();
 const SIGNING_SECRET = (process.env.ARCBRIEF_PROXY_SIGNING_SECRET || '').trim();
 const READ_ONLY = process.env.ARCBRIEF_PUBLIC_READ_ONLY === '1';
+const STATIC_DEMO = process.env.ARCBRIEF_STATIC_DEMO === '1';
+const DEMO_SNAPSHOT = demoSnapshot as DemoSnapshot;
 
 const PUBLIC_GET_ALLOWLIST = [
   /^\/health$/,
@@ -91,10 +95,38 @@ function readOnlyResponse(): Response {
   );
 }
 
+function staticDemoResponse(result: StaticDemoResult): Response {
+  if (result.kind === 'json') {
+    return Response.json(result.body, { status: result.status });
+  }
+  if (result.kind === 'text') {
+    return new Response(result.body, {
+      status: result.status,
+      headers: { 'content-type': result.contentType },
+    });
+  }
+  if (result.kind === 'redirect') {
+    return new Response(null, {
+      status: 307,
+      headers: { location: result.location, 'cache-control': 'public, max-age=3600' },
+    });
+  }
+  return Response.json(
+    { error_code: result.error_code, message: result.message },
+    { status: result.status }
+  );
+}
+
 async function proxy(request: NextRequest, pathParts: string[]): Promise<Response> {
   const method = request.method.toUpperCase();
   const path = normalizePath(pathParts);
   if (method === 'OPTIONS') return new Response(null, { status: 204 });
+
+  if (STATIC_DEMO) {
+    return staticDemoResponse(
+      resolveStaticDemoRoute(DEMO_SNAPSHOT, method, path, request.nextUrl.searchParams)
+    );
+  }
 
   const kind = classifyRoute(method, path);
   if (kind === 'forbidden') {

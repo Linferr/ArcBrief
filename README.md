@@ -162,6 +162,35 @@ Leave `ARCBRIEF_PROXY_ADMIN_KEY` empty in the hosted frontend. The read-only pro
 
 > Privacy note: this mode exposes research history, stored reports, and the app configuration (including the entity watchlist) publicly. Make sure the content in the deployed database is safe to publish before enabling it.
 
+### Backend-free static demo
+
+If the backend host is unavailable, the frontend can serve a bundled snapshot instead of proxying to FastAPI. The snapshot covers recent briefs, article history, report texts, feedback counts, configuration, RSS health, and starter packs. PDF exports are pre-rendered static files.
+
+Generate the snapshot from a local database:
+
+```bash
+python scripts/build_demo_snapshot.py --db arcbrief.db --out frontend/demo-data
+```
+
+Generate the PDFs (uses headless Microsoft Edge; set `EDGE_PATH` if it is installed elsewhere):
+
+```bash
+cd frontend
+npm run demo:pdfs
+```
+
+Deploy the `frontend` directory to Vercel with:
+
+```bash
+ARCBRIEF_STATIC_DEMO=1
+ARCBRIEF_PUBLIC_READ_ONLY=1
+NEXT_PUBLIC_ARCBRIEF_READ_ONLY=1
+```
+
+No `ARCBRIEF_PROXY_API_BASE` is needed in this mode. The BFF answers GET routes from `frontend/demo-data/snapshot.json` and redirects export requests to `frontend/public/demo/pdfs`. Every write request returns `403 READ_ONLY_DEMO`.
+
+The snapshot and PDFs are committed alongside the frontend so Vercel can serve them without a database. Regenerate both whenever the source database changes.
+
 ## License
 
 Released under the [MIT License](LICENSE). © 2026 Linferr
