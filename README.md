@@ -2,6 +2,8 @@
 
 > Local-first AI intelligence workstation — continuous tracking meets deep research in one product loop.
 
+[Live Demo](https://arc-brief.vercel.app) · [MIT License](LICENSE)
+
 ![Architecture](product_image/AecBrief.png)
 
 ArcBrief is a deployable AI intelligence workstation with two core engines:
@@ -136,7 +138,6 @@ The Discord bot is positioned as a daily brief reading entry point plus a deep-a
 - `/refresh all` is intended for testing, manual recovery, and ad-hoc “get me the latest now” usage
 - Discord-side bookmarks are currently paused; the backend bookmark APIs remain in place but are not exposed through bot commands in this phase
 
-## Portfolio Report
+## License
 
-- Product Case (Markdown): `docs/portfolio/arcbrief-product-case.md`
-- Product Case (PDF): `docs/portfolio/ArcBrief_Product_Case_PM.pdf`
+Released under the [MIT License](LICENSE). © 2026 Linferr
