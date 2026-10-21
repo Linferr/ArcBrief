@@ -5,6 +5,7 @@ import { apiFetch, downloadPdfResponse, markdownToPlainText, Topic, Brief, Recen
 import MarkdownViewer from './MarkdownViewer';
 import { computeDigestHealth, computeTopicHealth, healthStateClassName } from './healthState';
 import { runBriefRefreshAll } from './briefRefresh';
+import { isReadOnlyDemo } from './demoMode';
 
 interface Props {
   topics: Topic[];
@@ -117,7 +118,7 @@ const toReadableBriefBody = (body: string): string => {
     .filter((line) => !_isBoilerplateLine(line))
     .join('\n')
     .trim();
-  return normalized || 'No synthesized summary available yet. Try Refresh Brief to regenerate.';
+  return normalized || 'No synthesized summary available yet.';
 };
 
 const parseSourceLine = (raw: string): RenderedSource => {
@@ -277,7 +278,9 @@ export default function NewsFeedPanel({
   onRequestedTopicHandled,
   refreshToken = 0,
 }: Props) {
-  const allowAdminActions = process.env.NEXT_PUBLIC_ARCBRIEF_ENABLE_ADMIN_ACTIONS !== '0';
+  const readOnlyDemo = isReadOnlyDemo();
+  const allowAdminActions =
+    !readOnlyDemo && process.env.NEXT_PUBLIC_ARCBRIEF_ENABLE_ADMIN_ACTIONS !== '0';
   const [activeTopic, setActiveTopic] = useState<ActiveTopicKey>('all');
   const [briefHistory, setBriefHistory] = useState<Brief[]>([]);
   const [recentBriefIndex, setRecentBriefIndex] = useState<RecentBrief[]>([]);
@@ -730,9 +733,11 @@ export default function NewsFeedPanel({
 
           {visibleAllTopicBriefs.length === 0 && (
             <div className="muted">
-              {refreshFailed
-                ? 'Brief generation failed in the latest cycle. Click Refresh Brief to try again.'
-                : 'No topic briefs generated yet. Click Refresh Brief to generate one for each topic.'}
+              {readOnlyDemo
+                ? 'No briefs are available for this topic in the demo snapshot.'
+                : refreshFailed
+                  ? 'Brief generation failed in the latest cycle. Click Refresh Brief to try again.'
+                  : 'No topic briefs generated yet. Click Refresh Brief to generate one for each topic.'}
             </div>
           )}
 
@@ -990,17 +995,19 @@ export default function NewsFeedPanel({
                       )}
 
                       <div className="brief-footer-actions">
-                        <button
-                          className="ghost"
-                          onClick={() =>
-                            onSendToResearch?.(
-                              buildBriefFollowupQuery(activeTopicRecord.name, selectedBrief.date),
-                              selectedBrief.id,
-                            )
-                          }
-                        >
-                          Research This Brief
-                        </button>
+                        {!readOnlyDemo && (
+                          <button
+                            className="ghost"
+                            onClick={() =>
+                              onSendToResearch?.(
+                                buildBriefFollowupQuery(activeTopicRecord.name, selectedBrief.date),
+                                selectedBrief.id,
+                              )
+                            }
+                          >
+                            Research This Brief
+                          </button>
+                        )}
                         <button className="export-brief-btn" onClick={() => exportBriefPdf(selectedBrief.id)} title="Export as PDF">
                           Export PDF
                         </button>
@@ -1069,7 +1076,11 @@ export default function NewsFeedPanel({
 
             {briefHistory.length === 0 && (
               <div className="card brief-card" style={{ textAlign: 'center', padding: '2rem' }}>
-                <p className="muted">No briefs yet. Click &quot;Refresh Brief&quot; at the top to create your first brief.</p>
+                <p className="muted">
+                  {readOnlyDemo
+                    ? 'No briefs are available for this topic in the demo snapshot.'
+                    : 'No briefs yet. Click "Refresh Brief" at the top to create your first brief.'}
+                </p>
               </div>
             )}
           </div>

@@ -5,6 +5,7 @@ These tests read the BFF route.ts source and verify structural invariants
 """
 
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -15,6 +16,12 @@ ROUTE_FILE = Path("frontend/app/api/proxy/[...path]/route.ts")
 
 def _route_source() -> str:
     return ROUTE_FILE.read_text(encoding="utf-8")
+
+
+def _classify_route_body() -> str:
+    match = re.search(r"function classifyRoute\(.*?\n\}", _route_source(), re.S)
+    assert match, "classifyRoute must exist at top level"
+    return match.group(0)
 
 
 def test_bff_has_allowlist_for_public_get_and_guest_post():
@@ -56,15 +63,25 @@ def test_bff_admin_key_gated_by_env_var():
     src = _route_source()
     assert "ARCBRIEF_PROXY_ADMIN_KEY" in src
     assert "ADMIN_API_KEY" in src
-    # classifyRoute must check ADMIN_API_KEY before returning 'admin'
-    lines = [l.strip() for l in src.splitlines()]
-    in_classify = False
-    found_admin_check = False
-    for line in lines:
-        if "function classifyRoute" in line:
-            in_classify = True
-        if in_classify and "ADMIN_API_KEY" in line and "'admin'" in line:
-            found_admin_check = True
-        if in_classify and line.startswith("}"):
-            break
-    assert found_admin_check, "classifyRoute must check ADMIN_API_KEY before returning 'admin'"
+    classify = _classify_route_body()
+    assert "ADMIN_API_KEY" in classify and "'admin'" in classify
+
+
+def test_bff_read_only_mode_flag_and_allowlist():
+    """Read-only demo exposes extra GET surfaces and its own allowlist."""
+    src = _route_source()
+    assert "ARCBRIEF_PUBLIC_READ_ONLY" in src
+    assert "READ_ONLY_GET_ALLOWLIST" in src
+    for pattern in ("\\/history", "\\/report\\/", "\\/starter-packs", "\\/system\\/status", "\\/config", "\\/rss-health"):
+        assert pattern in src, pattern
+    assert "READ_ONLY_DEMO" in src
+    assert "readOnlyResponse()" in src
+
+
+def test_bff_read_only_blocks_guest_and_admin_writes():
+    """When read-only, guest POST is not classified and admin key is never attached."""
+    src = _route_source()
+    classify = _classify_route_body()
+    assert "!READ_ONLY && method === 'POST'" in classify
+    assert "!READ_ONLY && ADMIN_API_KEY" in classify
+    assert "if (READ_ONLY && method === 'POST') return readOnlyResponse();" in src

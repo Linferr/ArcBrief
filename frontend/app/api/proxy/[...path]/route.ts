@@ -6,6 +6,7 @@ const API_BASE = (process.env.ARCBRIEF_PROXY_API_BASE || 'http://localhost:8000/
 const GUEST_API_KEY = (process.env.ARCBRIEF_PROXY_API_KEY || '').trim();
 const ADMIN_API_KEY = (process.env.ARCBRIEF_PROXY_ADMIN_KEY || '').trim();
 const SIGNING_SECRET = (process.env.ARCBRIEF_PROXY_SIGNING_SECRET || '').trim();
+const READ_ONLY = process.env.ARCBRIEF_PUBLIC_READ_ONLY === '1';
 
 const PUBLIC_GET_ALLOWLIST = [
   /^\/health$/,
@@ -15,14 +16,31 @@ const PUBLIC_GET_ALLOWLIST = [
   /^\/briefs\/\d+\/export\/pdf$/,
 ];
 
+const READ_ONLY_GET_ALLOWLIST = [
+  /^\/history$/,
+  /^\/report\/[^/]+$/,
+  /^\/report\/[^/]+\/export\/pdf$/,
+  /^\/briefs\/\d+\/history$/,
+  /^\/topics\/\d+\/articles$/,
+  /^\/starter-packs$/,
+  /^\/system\/status$/,
+  /^\/config$/,
+  /^\/rss-health$/,
+];
+
 const GUEST_POST_ALLOWLIST = [/^\/run$/, /^\/chat$/];
 
 type RouteKind = 'public_get' | 'guest_post' | 'admin' | 'forbidden';
 
 function classifyRoute(method: string, path: string): RouteKind {
   if (method === 'GET' && PUBLIC_GET_ALLOWLIST.some((p) => p.test(path))) return 'public_get';
-  if (method === 'POST' && GUEST_POST_ALLOWLIST.some((p) => p.test(path))) return 'guest_post';
-  if (ADMIN_API_KEY) return 'admin';
+  if (READ_ONLY && method === 'GET' && READ_ONLY_GET_ALLOWLIST.some((p) => p.test(path))) {
+    return 'public_get';
+  }
+  if (!READ_ONLY && method === 'POST' && GUEST_POST_ALLOWLIST.some((p) => p.test(path))) {
+    return 'guest_post';
+  }
+  if (!READ_ONLY && ADMIN_API_KEY) return 'admin';
   return 'forbidden';
 }
 
@@ -63,13 +81,26 @@ function forbiddenResponse(): Response {
   );
 }
 
+function readOnlyResponse(): Response {
+  return Response.json(
+    {
+      error_code: 'READ_ONLY_DEMO',
+      message: 'This public demo is read-only. Live research and chat are disabled.',
+    },
+    { status: 403 }
+  );
+}
+
 async function proxy(request: NextRequest, pathParts: string[]): Promise<Response> {
   const method = request.method.toUpperCase();
   const path = normalizePath(pathParts);
   if (method === 'OPTIONS') return new Response(null, { status: 204 });
 
   const kind = classifyRoute(method, path);
-  if (kind === 'forbidden') return forbiddenResponse();
+  if (kind === 'forbidden') {
+    if (READ_ONLY && method === 'POST') return readOnlyResponse();
+    return forbiddenResponse();
+  }
 
   const headers = new Headers();
   const incomingType = request.headers.get('content-type');

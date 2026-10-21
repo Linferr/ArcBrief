@@ -7,6 +7,7 @@ import ResearchPanel from './components/ResearchPanel';
 import SettingsPanel from './components/SettingsPanel';
 import ArchivesPanel from './components/ArchivesPanel';
 import GuideOverlay from './components/GuideOverlay';
+import { isReadOnlyDemo } from './components/demoMode';
 
 type PanelKey = 'news' | 'research' | 'settings' | 'archives';
 type ThemeMode = 'warm' | 'cool';
@@ -14,6 +15,7 @@ type ThemeMode = 'warm' | 'cool';
 const THEME_KEY = 'arcbrief-theme';
 
 export default function Page() {
+  const readOnlyDemo = isReadOnlyDemo();
   const [panel, setPanel] = useState<PanelKey>('news');
   const [topics, setTopics] = useState<Topic[]>([]);
   const [researchRunning, setResearchRunning] = useState(false);
@@ -182,9 +184,9 @@ export default function Page() {
         </nav>
 
         <div className="sidebar-foot">
-          <button className="system-pill">
-            <span className="system-dot" />
-            <span>System Operational</span>
+          <button className="system-pill" title={readOnlyDemo ? 'Public demo: browsing only' : 'Backend status'}>
+            <span className={`system-dot ${readOnlyDemo ? 'system-dot-demo' : ''}`} />
+            <span>{readOnlyDemo ? 'Read-only Demo' : 'System Operational'}</span>
           </button>
         </div>
       </aside>
@@ -197,12 +199,19 @@ export default function Page() {
             <span className="current">{panelMeta[panel].breadcrumb}</span>
           </div>
           <div className="workspace-status ui-font">
+            {readOnlyDemo && <span className="read-only-pill">Read-only demo</span>}
             <span className="version-tag">v2.4.0</span>
-            <div className="avatar-chip">OP</div>
+            <div className="avatar-chip">{readOnlyDemo ? 'RO' : 'OP'}</div>
           </div>
         </header>
 
         <div className="content-scroll" id="content-container">
+          {readOnlyDemo && (
+            <div className="read-only-banner ui-font">
+              <strong>Read-only demo.</strong> Browse generated briefs and research reports. Live research,
+              brief generation, and configuration changes are disabled.
+            </div>
+          )}
           <div style={{ display: panel === 'news' ? 'block' : 'none' }}>
             <NewsFeedPanel
               topics={topics}
@@ -252,16 +261,18 @@ export default function Page() {
         </svg>
       </button>
 
-      <GuideOverlay
-        topics={topics}
-        deepActionStarted={guideDeepActionStarted}
-        onNavigateDailyBrief={() => setPanel('news')}
-        onNavigateSettings={() => setPanel('settings')}
-        onNavigateArchive={() => setPanel('archives')}
-        onSendToResearch={handleSendToResearch}
-        onOpenTopicBrief={handleOpenTopicBrief}
-        onRefreshCompleted={handleGuideRefreshCompleted}
-      />
+      {!readOnlyDemo && (
+        <GuideOverlay
+          topics={topics}
+          deepActionStarted={guideDeepActionStarted}
+          onNavigateDailyBrief={() => setPanel('news')}
+          onNavigateSettings={() => setPanel('settings')}
+          onNavigateArchive={() => setPanel('archives')}
+          onSendToResearch={handleSendToResearch}
+          onOpenTopicBrief={handleOpenTopicBrief}
+          onRefreshCompleted={handleGuideRefreshCompleted}
+        />
+      )}
     </div>
   );
 }

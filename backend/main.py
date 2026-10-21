@@ -119,6 +119,22 @@ _PUBLIC_EXPORT_PATTERNS = (
     re.compile(r"^/api/briefs/\d+/export$"),
     re.compile(r"^/api/briefs/\d+/export/pdf$"),
 )
+# Extra read-only surfaces for a hosted public demo. These stay admin-only
+# unless ARCBRIEF_PUBLIC_DEMO_READ_ONLY=1, because they can expose research
+# history and reports that were created for private use.
+_PUBLIC_DEMO_READ_PATTERNS = (
+    re.compile(r"^/api/history$"),
+    re.compile(r"^/api/report/[^/]+$"),
+    re.compile(r"^/api/briefs/\d+/history$"),
+    re.compile(r"^/api/topics/\d+/articles$"),
+    re.compile(r"^/api/starter-packs$"),
+    re.compile(r"^/api/system/status$"),
+    re.compile(r"^/api/config$"),
+    re.compile(r"^/api/rss-health$"),
+)
+_PUBLIC_DEMO_EXPORT_PATTERNS = (
+    re.compile(r"^/api/report/[^/]+/export/pdf$"),
+)
 _GUEST_POST_PATHS = frozenset({"/api/run", "/api/chat"})
 _SUPPORTED_LANGUAGES = frozenset({"English (US)", "Chinese (Simplified)", "Japanese"})
 
@@ -132,9 +148,14 @@ def _check_route_rate_limit(route: str, identity: str, limit: int) -> bool:
 
 
 def _public_rate_limit_for_path(path: str) -> Optional[tuple[str, int]]:
+    demo_read = PUBLIC_DEMO_READ_ONLY
     if any(pattern.match(path) for pattern in _PUBLIC_EXPORT_PATTERNS):
         return ("export", PUBLIC_EXPORT_RATE_LIMIT)
+    if demo_read and any(pattern.match(path) for pattern in _PUBLIC_DEMO_EXPORT_PATTERNS):
+        return ("export", PUBLIC_EXPORT_RATE_LIMIT)
     if any(pattern.match(path) for pattern in _PUBLIC_READ_PATTERNS):
+        return ("read", PUBLIC_READ_RATE_LIMIT)
+    if demo_read and any(pattern.match(path) for pattern in _PUBLIC_DEMO_READ_PATTERNS):
         return ("read", PUBLIC_READ_RATE_LIMIT)
     return None
 
@@ -159,6 +180,7 @@ DEFAULT_LOCAL_API_KEY = "arcbrief-local-dev-key"
 DEFAULT_PUBLIC_API_KEY = "arcbrief-public-demo-key"
 _STARTUP_TIME: Optional[str] = None
 DISABLE_AUTH = os.getenv("ARCBRIEF_DISABLE_AUTH", "0") == "1"
+PUBLIC_DEMO_READ_ONLY = os.getenv("ARCBRIEF_PUBLIC_DEMO_READ_ONLY", "0") == "1"
 
 
 def _default_topic_presets() -> List[Dict]:
@@ -466,6 +488,11 @@ def _expected_admin_api_key() -> str:
     return raw or DEFAULT_LOCAL_API_KEY
 
 
+def _admin_key_configured() -> bool:
+    raw = os.getenv("ARCBRIEF_API_KEY", "").strip()
+    return raw not in {"", "replace-with-your-key", "your_key", "changeme"}
+
+
 def _expected_public_api_key() -> str:
     raw = os.getenv("ARCBRIEF_PUBLIC_API_KEY", "").strip()
     if raw in {"", "replace-with-your-key", "your_public_key", "changeme"}:
@@ -569,10 +596,13 @@ async def api_key_guard(request: Request, call_next):
 
     provided = (request.headers.get("X-API-Key") or "").strip()
     admin_key = _expected_admin_api_key()
+    if PUBLIC_DEMO_READ_ONLY and not _admin_key_configured():
+        # Never fall back to the public default key on a hosted demo.
+        admin_key = ""
     public_key = _expected_public_api_key()
 
     role: Optional[str] = None
-    if provided == admin_key:
+    if provided and provided == admin_key:
         role = "admin"
     elif path in _GUEST_POST_PATHS and provided == public_key:
         role = "guest"
@@ -581,6 +611,15 @@ async def api_key_guard(request: Request, call_next):
         return JSONResponse(
             status_code=401,
             content={"error_code": "UNAUTHORIZED", "message": "Invalid or missing API key"},
+        )
+
+    if PUBLIC_DEMO_READ_ONLY and role == "guest":
+        return JSONResponse(
+            status_code=403,
+            content={
+                "error_code": "READ_ONLY_DEMO",
+                "message": "This public demo is read-only. Live research and chat are disabled.",
+            },
         )
 
     if path not in _GUEST_POST_PATHS and role != "admin":

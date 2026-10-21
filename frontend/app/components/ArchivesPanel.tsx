@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { apiFetch, downloadPdfResponse, RecentBrief, Topic } from './api';
 import MarkdownViewer from './MarkdownViewer';
+import { isReadOnlyDemo } from './demoMode';
 
 interface Props {
   topics: Topic[];
@@ -27,6 +28,7 @@ const buildArchiveFollowupQuery = (topicName: string, briefDate: string): string
   `Extend the archived ${topicName} brief from ${briefDate}. Re-check the main signals, verify them against current sources, and note what changed since publication.`;
 
 export default function ArchivesPanel({ topics, onSendToResearch }: Props) {
+  const readOnlyDemo = isReadOnlyDemo();
   const [topicFilter, setTopicFilter] = useState<string>('all');
   const [items, setItems] = useState<RecentBrief[]>([]);
   const [loading, setLoading] = useState(false);
@@ -134,7 +136,11 @@ export default function ArchivesPanel({ topics, onSendToResearch }: Props) {
                 </button>
               ))}
             {!loading && items.length === 0 && (
-              <div className="muted ui-font text-sm">No archived briefs yet. Generate briefs from Daily Brief first.</div>
+              <div className="muted ui-font text-sm">
+                {readOnlyDemo
+                  ? 'No archived briefs are available in this demo snapshot.'
+                  : 'No archived briefs yet. Generate briefs from Daily Brief first.'}
+              </div>
             )}
           </div>
         </div>
@@ -144,17 +150,19 @@ export default function ArchivesPanel({ topics, onSendToResearch }: Props) {
             <h4 className="section-eyebrow" style={{ margin: 0 }}>Preview</h4>
             {selectedBrief && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <button
-                  className="ghost"
-                  onClick={() =>
-                    onSendToResearch?.(
-                      buildArchiveFollowupQuery(selectedBrief.topic_name, selectedBrief.date),
-                      selectedBrief.id,
-                    )
-                  }
-                >
-                  Research This Brief
-                </button>
+                {!readOnlyDemo && (
+                  <button
+                    className="ghost"
+                    onClick={() =>
+                      onSendToResearch?.(
+                        buildArchiveFollowupQuery(selectedBrief.topic_name, selectedBrief.date),
+                        selectedBrief.id,
+                      )
+                    }
+                  >
+                    Research This Brief
+                  </button>
+                )}
                 <button 
                   className="ghost group" 
                   style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '32px', padding: '0 12px' }} 

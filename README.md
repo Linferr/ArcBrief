@@ -138,6 +138,30 @@ The Discord bot is positioned as a daily brief reading entry point plus a deep-a
 - `/refresh all` is intended for testing, manual recovery, and ad-hoc “get me the latest now” usage
 - Discord-side bookmarks are currently paused; the backend bookmark APIs remain in place but are not exposed through bot commands in this phase
 
+## Public Read-Only Demo
+
+For showcasing ArcBrief without spending LLM or search credits, run it in read-only demo mode. Stored briefs and research reports stay browsable and exportable, while live research, chat, brief generation, and every write operation are blocked.
+
+Backend (Railway):
+
+```bash
+ARCBRIEF_PUBLIC_DEMO_READ_ONLY=1
+ARCBRIEF_API_KEY=<long-random-value>
+```
+
+Set a strong `ARCBRIEF_API_KEY`. If it is left unset, read-only mode disables admin access entirely instead of falling back to the development default key.
+
+Frontend (Vercel):
+
+```bash
+ARCBRIEF_PUBLIC_READ_ONLY=1
+NEXT_PUBLIC_ARCBRIEF_READ_ONLY=1
+```
+
+Leave `ARCBRIEF_PROXY_ADMIN_KEY` empty in the hosted frontend. The read-only proxy ignores it, but an unset value also prevents accidental admin access if the flag is ever removed.
+
+> Privacy note: this mode exposes research history, stored reports, and the app configuration (including the entity watchlist) publicly. Make sure the content in the deployed database is safe to publish before enabling it.
+
 ## License
 
 Released under the [MIT License](LICENSE). © 2026 Linferr

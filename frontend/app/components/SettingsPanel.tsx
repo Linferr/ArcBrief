@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { apiFetch, Topic, SystemStatus, RssHealthEntry, AppConfig, StarterPack, getTopicColor, toCsv } from './api';
+import { isReadOnlyDemo } from './demoMode';
 
 interface Props {
   topics: Topic[];
@@ -72,7 +73,9 @@ function ListEditor({
 
 export default function SettingsPanel({ topics, onTopicsChange }: Props) {
   const showDeveloperPanels = process.env.NEXT_PUBLIC_SHOW_DEV_PANELS === '1';
-  const allowAdminActions = process.env.NEXT_PUBLIC_ARCBRIEF_ENABLE_ADMIN_ACTIONS !== '0';
+  const readOnlyDemo = isReadOnlyDemo();
+  const allowAdminActions =
+    !readOnlyDemo && process.env.NEXT_PUBLIC_ARCBRIEF_ENABLE_ADMIN_ACTIONS !== '0';
 
   // Create form state (arrays, not comma strings)
   const [topicName, setTopicName] = useState('');
@@ -102,6 +105,7 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
   const [rssHealth, setRssHealth] = useState<RssHealthEntry[]>([]);
   const [healthExpanded, setHealthExpanded] = useState(false);
   const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
+  const [configLoaded, setConfigLoaded] = useState(false);
   const [starterPacks, setStarterPacks] = useState<StarterPack[]>([]);
   const [applyingPackId, setApplyingPackId] = useState<string | null>(null);
   const [configSaving, setConfigSaving] = useState(false);
@@ -119,12 +123,15 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
   };
 
   useEffect(() => {
+    setConfigLoaded(false);
     refreshSystemStatus();
     apiFetch('/starter-packs').then(r => r.ok ? r.json() : []).then(d => setStarterPacks(Array.isArray(d) ? d : [])).catch(() => setStarterPacks([]));
-    if (allowAdminActions) {
-      apiFetch('/rss-health').then(r => r.ok ? r.json() : null).then(d => d && setRssHealth(d.sources || [])).catch(() => {});
-      apiFetch('/config').then(r => r.ok ? r.json() : null).then(d => d && setAppConfig(d)).catch(() => {});
-    }
+    apiFetch('/rss-health').then(r => r.ok ? r.json() : null).then(d => d && setRssHealth(d.sources || [])).catch(() => {});
+    apiFetch('/config')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => d && setAppConfig(d))
+      .catch(() => {})
+      .finally(() => setConfigLoaded(true));
   }, [allowAdminActions, showDeveloperPanels]);
 
   useEffect(() => {
@@ -350,7 +357,13 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
       {!allowAdminActions && (
         <div className="card" style={{ marginBottom: '12px' }}>
           <div className="muted">
-            Write operations are disabled (public demo mode). To enable locally: set <code>NEXT_PUBLIC_ARCBRIEF_ENABLE_ADMIN_ACTIONS=1</code> in <code>frontend/.env.local</code>, or remove the variable entirely. For production, update the value in Vercel Environment Variables.
+            {readOnlyDemo
+              ? 'This is a read-only demo. Topic intake, brief generation, and configuration changes are disabled; the values below are shown for reference.'
+              : (
+                <>
+                  Write operations are disabled (public demo mode). To enable locally: set <code>NEXT_PUBLIC_ARCBRIEF_ENABLE_ADMIN_ACTIONS=1</code> in <code>frontend/.env.local</code>, or remove the variable entirely. For production, update the value in Vercel Environment Variables.
+                </>
+              )}
           </div>
         </div>
       )}
@@ -512,7 +525,11 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
               </div>
             )}
             {!allowAdminActions ? (
-              <div className="muted">Topic intake is disabled in public demo mode.</div>
+              <div className="muted">
+                {readOnlyDemo
+                  ? 'Topic intake is disabled in this read-only demo.'
+                  : 'Topic intake is disabled in public demo mode.'}
+              </div>
             ) : (
             <div className="form">
               <label>Name *<input value={topicName} onChange={e => setTopicName(e.target.value)} placeholder="e.g., AI Daily" /></label>
@@ -559,7 +576,11 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
       <div className="settings-section">
         <h3 className="settings-section-title">Agent Behavior</h3>
         <div className="card">
-          {!appConfig && <div className="muted">Loading protocol configuration...</div>}
+          {!appConfig && (
+            <div className="muted">
+              {configLoaded ? 'Configuration is unavailable in this mode.' : 'Loading protocol configuration...'}
+            </div>
+          )}
           {appConfig && (
             <>
               <div className="settings-toggle-row">
@@ -570,6 +591,7 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
                 <input
                   type="checkbox"
                   checked={appConfig.strict_academic_mode}
+                  disabled={!allowAdminActions}
                   onChange={(e) => setAppConfig({ ...appConfig, strict_academic_mode: e.target.checked })}
                 />
               </div>
@@ -581,6 +603,7 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
                 <input
                   type="checkbox"
                   checked={appConfig.critical_analysis_layer}
+                  disabled={!allowAdminActions}
                   onChange={(e) => setAppConfig({ ...appConfig, critical_analysis_layer: e.target.checked })}
                 />
               </div>
@@ -590,6 +613,7 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
                   rows={3}
                   value={appConfig.entity_watchlist || ''}
                   placeholder="e.g. Sam Altman, TSMC 3nm, GPT-5"
+                  disabled={!allowAdminActions}
                   onChange={(e) => setAppConfig({ ...appConfig, entity_watchlist: e.target.value })}
                 />
               </label>
@@ -597,6 +621,7 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
                 Cognitive Model
                 <select
                   value={appConfig.cognitive_model || 'Neutral (Fact-first)'}
+                  disabled={!allowAdminActions}
                   onChange={(e) => setAppConfig({ ...appConfig, cognitive_model: e.target.value })}
                 >
                   <option>Neutral (Fact-first)</option>
@@ -622,6 +647,7 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
               Report Output Language
               <select
                 value={appConfig.report_language}
+                disabled={!allowAdminActions}
                 onChange={(e) => setAppConfig({ ...appConfig, report_language: e.target.value })}
               >
                 <option>English (US)</option>
@@ -636,6 +662,7 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
               Primary LLM Model
               <select
                 value={appConfig.primary_model}
+                disabled={!allowAdminActions}
                 onChange={(e) => setAppConfig({ ...appConfig, primary_model: e.target.value })}
               >
                 <option>Qwen3 MAX</option>
@@ -655,6 +682,7 @@ export default function SettingsPanel({ topics, onTopicsChange }: Props) {
               Search Provider
               <select
                 value={appConfig.search_provider}
+                disabled={!allowAdminActions}
                 onChange={(e) => setAppConfig({ ...appConfig, search_provider: e.target.value })}
               >
                 <option>Tavily Search API</option>
